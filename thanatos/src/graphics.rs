@@ -1,13 +1,15 @@
+use crate::event::Event;
+use glam::{Mat4, Vec3};
 use std::borrow::Cow;
 use std::sync::Arc;
+use tokio::sync::broadcast::{Receiver, Sender};
+use wgpu::util::DeviceExt;
 use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
-use tokio::sync::broadcast::{Sender, Receiver};
-use crate::event::Event;
 
 pub struct Window {
     event_loop: winit::event_loop::EventLoop<()>,
     window: Arc<winit::window::Window>,
-    tx: Sender<Event>
+    tx: Sender<Event>,
 }
 
 impl Window {
@@ -17,7 +19,11 @@ impl Window {
             .build(&event_loop)
             .unwrap();
         let window = Arc::new(window);
-        Self { event_loop, window, tx }
+        Self {
+            event_loop,
+            window,
+            tx,
+        }
     }
 
     pub fn tick(&mut self) -> bool {
@@ -45,8 +51,53 @@ impl Window {
             })
             .unwrap();
 
-
         should_close
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex {
+    pub position: Vec3,
+    pub colour: Vec3,
+}
+
+impl Vertex {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array!(0 => Float32x3, 1 => Float32x3);
+
+    pub const fn get_layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
+}
+
+pub struct Camera {
+    pub eye: Vec3,
+    pub direction: Vec3,
+    pub fov: f32,
+    pub aspect: f32,
+}
+
+impl Camera {
+    pub fn new(window: &Window) -> Self {
+        let size = window.window.inner_size();
+        let aspect = size.width as f32 / size.height as f32;
+        Self {
+            eye: Vec3::ONE,
+            direction: Vec3::NEG_ONE,
+            fov: std::f32::consts::PI / 2.0,
+            aspect,
+        }
+    }
+
+    pub fn get_matrix(&self) -> Mat4 {
+        let view = Mat4::look_to_rh(self.eye, self.direction, Vec3::Y);
+        let projection = Mat4::perspective_infinite_rh(self.fov, self.aspect, 0.1);
+        projection * view
     }
 }
 
@@ -61,7 +112,12 @@ pub struct Graphics<'a> {
     render_pipeline: wgpu::RenderPipeline,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    rx: Receiver<Event>
+    pub camera: Camera,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    rx: Receiver<Event>,
 }
 
 impl<'a> Graphics<'a> {
@@ -104,14 +160,80 @@ impl<'a> Graphics<'a> {
             ))),
         });
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[],
-            push_constant_ranges: &[],
-        });
-
         let swapchain_capabilities = surface.get_capabilities(&adapter);
         let swapchain_format = swapchain_capabilities.formats[0];
+
+        let config = surface
+            .get_default_config(&adapter, size.width, size.height)
+            .unwrap();
+        surface.configure(&device, &config);
+
+        let camera = Camera::new(window);
+
+        let vertices = [
+            Vertex {
+                position: Vec3::new(0.0, 0.5, 0.0),
+                colour: Vec3::X,
+            },
+            Vertex {
+                position: Vec3::new(-0.5, -0.5, 0.0),
+                colour: Vec3::Y,
+            },
+            Vertex {
+                position: Vec3::new(0.5, -0.5, 0.0),
+                colour: Vec3::Z,
+            },
+        ];
+
+        let indices = [0, 1, 2];
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&camera.get_matrix().to_cols_array()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: None,
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+            label: None,
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&camera_bind_group_layout],
+            push_constant_ranges: &[],
+        });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
@@ -119,7 +241,7 @@ impl<'a> Graphics<'a> {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[],
+                buffers: &[Vertex::get_layout()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -132,11 +254,6 @@ impl<'a> Graphics<'a> {
             multiview: None,
         });
 
-        let config = surface
-            .get_default_config(&adapter, size.width, size.height)
-            .unwrap();
-        surface.configure(&device, &config);
-
         Self {
             instance,
             adapter,
@@ -148,7 +265,12 @@ impl<'a> Graphics<'a> {
             shader,
             config,
             size,
-            rx
+            camera,
+            vertex_buffer,
+            index_buffer,
+            camera_buffer,
+            camera_bind_group,
+            rx,
         }
     }
 
@@ -162,6 +284,8 @@ impl<'a> Graphics<'a> {
                 }
             }
         }
+
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&self.camera.get_matrix().to_cols_array()));
 
         let frame = self
             .surface
@@ -189,7 +313,10 @@ impl<'a> Graphics<'a> {
                 occlusion_query_set: None,
             });
             rpass.set_pipeline(&self.render_pipeline);
-            rpass.draw(0..3, 0..1);
+            rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            rpass.set_bind_group(0, &self.camera_bind_group, &[]);
+            rpass.draw_indexed(0..3, 0, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));

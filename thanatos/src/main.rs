@@ -11,6 +11,8 @@ async fn main() {
     let mut n = 0;
     let started = Instant::now();
     while !window.tick() {
+        ctx.camera.eye = glam::Quat::from_rotation_y(0.01).mul_vec3(ctx.camera.eye);
+        ctx.camera.direction = -ctx.camera.eye;
         ctx.draw().await;
         n += 1;
     }
