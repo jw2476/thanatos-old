@@ -1,59 +1,10 @@
-use crate::event::Event;
+use crate::{
+    event::Event,
+    world::{System, World}, camera::Camera, window::Window,
+};
 use glam::{Mat4, Vec3};
 use std::borrow::Cow;
-use std::sync::Arc;
-use tokio::sync::broadcast::{Receiver, Sender};
 use wgpu::util::DeviceExt;
-use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
-
-pub struct Window {
-    event_loop: winit::event_loop::EventLoop<()>,
-    window: Arc<winit::window::Window>,
-    tx: Sender<Event>,
-}
-
-impl Window {
-    pub fn new(tx: Sender<Event>) -> Self {
-        let event_loop = winit::event_loop::EventLoop::new().unwrap();
-        let window = winit::window::WindowBuilder::new()
-            .build(&event_loop)
-            .unwrap();
-        let window = Arc::new(window);
-        Self {
-            event_loop,
-            window,
-            tx,
-        }
-    }
-
-    pub fn tick(&mut self) -> bool {
-        let mut should_close = false;
-
-        self.event_loop
-            .run_on_demand(|event, control| {
-                control.exit();
-
-                if let winit::event::Event::WindowEvent {
-                    window_id: _,
-                    event,
-                } = event
-                {
-                    match event {
-                        winit::event::WindowEvent::Resized(new_size) => {
-                            self.tx.send(Event::Resized(new_size)).unwrap();
-                        }
-                        winit::event::WindowEvent::CloseRequested => {
-                            should_close = true;
-                        }
-                        _ => (),
-                    }
-                }
-            })
-            .unwrap();
-
-        should_close
-    }
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -75,32 +26,6 @@ impl Vertex {
     }
 }
 
-pub struct Camera {
-    pub eye: Vec3,
-    pub direction: Vec3,
-    pub fov: f32,
-    pub aspect: f32,
-}
-
-impl Camera {
-    pub fn new(window: &Window) -> Self {
-        let size = window.window.inner_size();
-        let aspect = size.width as f32 / size.height as f32;
-        Self {
-            eye: Vec3::ONE,
-            direction: Vec3::NEG_ONE,
-            fov: std::f32::consts::PI / 2.0,
-            aspect,
-        }
-    }
-
-    pub fn get_matrix(&self) -> Mat4 {
-        let view = Mat4::look_to_rh(self.eye, self.direction, Vec3::Y);
-        let projection = Mat4::perspective_infinite_rh(self.fov, self.aspect, 0.1);
-        projection * view
-    }
-}
-
 pub struct Graphics<'a> {
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
@@ -112,12 +37,10 @@ pub struct Graphics<'a> {
     render_pipeline: wgpu::RenderPipeline,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    pub camera: Camera,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    rx: Receiver<Event>,
 }
 
 impl<'a> Graphics<'a> {
@@ -128,7 +51,7 @@ impl<'a> Graphics<'a> {
         size
     }
 
-    pub async fn new(window: &Window, rx: Receiver<Event>) -> Self {
+    pub async fn new(window: &Window) -> Self {
         let size = Self::get_size(&window.window);
 
         let instance = wgpu::Instance::default();
@@ -168,8 +91,6 @@ impl<'a> Graphics<'a> {
             .unwrap();
         surface.configure(&device, &config);
 
-        let camera = Camera::new(window);
-
         let vertices = [
             Vertex {
                 position: Vec3::new(0.0, 0.5, 0.0),
@@ -201,7 +122,7 @@ impl<'a> Graphics<'a> {
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
-            contents: bytemuck::cast_slice(&camera.get_matrix().to_cols_array()),
+            contents: bytemuck::cast_slice(&Mat4::IDENTITY.to_cols_array()),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -265,36 +186,49 @@ impl<'a> Graphics<'a> {
             shader,
             config,
             size,
-            camera,
             vertex_buffer,
             index_buffer,
             camera_buffer,
             camera_bind_group,
-            rx,
+        }
+    }
+}
+
+pub struct GraphicsSystem {}
+
+impl System for GraphicsSystem {
+    fn event(&self, world: &mut World, event: &Event) {
+        let mut ctx = world.get_mut::<Graphics>().unwrap();
+
+        match event {
+            Event::Resized(new_size) => {
+                ctx.config.width = new_size.width.max(1);
+                ctx.config.height = new_size.height.max(1);
+                ctx.surface.configure(&ctx.device, &ctx.config);
+            }
+            _ => (),
         }
     }
 
-    pub async fn draw(&mut self) {
-        while !self.rx.is_empty() {
-            match self.rx.recv().await.unwrap() {
-                Event::Resized(new_size) => {
-                    self.config.width = new_size.width.max(1);
-                    self.config.height = new_size.height.max(1);
-                    self.surface.configure(&self.device, &self.config);
-                }
-            }
-        }
+    fn tick(&self, world: &mut World) {
+        let camera = world.get::<Camera>().unwrap();
 
-        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&self.camera.get_matrix().to_cols_array()));
+        let ctx = world.get::<Graphics>().unwrap();
 
-        let frame = self
+        ctx.queue.write_buffer(
+            &ctx.camera_buffer,
+            0,
+            bytemuck::cast_slice(&camera.get_matrix().to_cols_array()),
+        );
+
+        let frame = ctx
             .surface
             .get_current_texture()
             .expect("Failed to acquire next swap chain texture");
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
+        let mut encoder = ctx
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
@@ -312,14 +246,14 @@ impl<'a> Graphics<'a> {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            rpass.set_pipeline(&self.render_pipeline);
-            rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            rpass.set_bind_group(0, &self.camera_bind_group, &[]);
+            rpass.set_pipeline(&ctx.render_pipeline);
+            rpass.set_vertex_buffer(0, ctx.vertex_buffer.slice(..));
+            rpass.set_index_buffer(ctx.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            rpass.set_bind_group(0, &ctx.camera_bind_group, &[]);
             rpass.draw_indexed(0..3, 0, 0..1);
         }
 
-        self.queue.submit(Some(encoder.finish()));
+        ctx.queue.submit(Some(encoder.finish()));
         frame.present();
     }
 }
