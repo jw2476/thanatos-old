@@ -1,5 +1,5 @@
 use crate::{
-    assets::MeshId,
+    assets::{self, MeshId},
     camera::Camera,
     event::Event,
     window::Window,
@@ -33,15 +33,13 @@ pub struct Context<'a> {
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
     surface: wgpu::Surface<'a>,
-    device: wgpu::Device,
+    pub device: wgpu::Device,
     queue: wgpu::Queue,
     shader: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
     render_pipeline: wgpu::RenderPipeline,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 }
@@ -94,39 +92,10 @@ impl<'a> Context<'a> {
             .unwrap();
         surface.configure(&device, &config);
 
-        let vertices = [
-            Vertex {
-                position: Vec3::new(0.0, 0.5, 0.0),
-                colour: Vec3::X,
-            },
-            Vertex {
-                position: Vec3::new(-0.5, -0.5, 0.0),
-                colour: Vec3::Y,
-            },
-            Vertex {
-                position: Vec3::new(0.5, -0.5, 0.0),
-                colour: Vec3::Z,
-            },
-        ];
-
-        let indices = [0, 1, 2];
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
             contents: bytemuck::cast_slice(&Mat4::IDENTITY.to_cols_array()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            label: None,
         });
 
         let camera_bind_group_layout =
@@ -189,8 +158,6 @@ impl<'a> Context<'a> {
             shader,
             config,
             size,
-            vertex_buffer,
-            index_buffer,
             camera_buffer,
             camera_bind_group,
         }
@@ -211,12 +178,14 @@ pub fn resize_surface(world: &mut World, event: &Event) {
 }
 
 pub struct RenderObject {
-    mesh: MeshId,
+    pub mesh: MeshId,
 }
 
 pub fn draw(world: &mut World) {
     let camera = world.get::<Camera>().unwrap();
     let ctx = world.get::<Context>().unwrap();
+    let assets = world.get::<assets::Manager>().unwrap();
+    let objects = world.get_components::<RenderObject>();
 
     ctx.queue.write_buffer(
         &ctx.camera_buffer,
@@ -250,10 +219,13 @@ pub fn draw(world: &mut World) {
             occlusion_query_set: None,
         });
         rpass.set_pipeline(&ctx.render_pipeline);
-        rpass.set_vertex_buffer(0, ctx.vertex_buffer.slice(..));
-        rpass.set_index_buffer(ctx.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         rpass.set_bind_group(0, &ctx.camera_bind_group, &[]);
-        rpass.draw_indexed(0..3, 0, 0..1);
+        objects.into_iter().for_each(|object| {
+            let mesh = assets.get_mesh(object.mesh).unwrap();
+            rpass.set_vertex_buffer(0, mesh.vertices.slice(..));
+            rpass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+            rpass.draw_indexed(0..mesh.num_indices, 0, 0..1);
+        })
     }
 
     ctx.queue.submit(Some(encoder.finish()));

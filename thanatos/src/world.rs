@@ -60,23 +60,46 @@ pub trait Archetype: Any {
 }
 
 macro_rules! impl_archetype {
-    ($for:ident, $for_ref:ident, $for_mut:ident, $( $field:ident: $type:ty ),*) => {
+    (struct $for:ident { $( $field:ident: $type:ty ),* }) => {
         pub struct $for {
             $($field: $type,)*
         }
 
-        pub struct $for_ref<'a> {
-            $($field: std::cell::Ref<'a, $type>,)*
-        }
-
-
-        pub struct $for_mut<'a> {
-            $($field: std::cell::RefMut<'a, $type>,)*
-        }
+        concat_idents::concat_idents!(for_ref = $for, Ref {
+            pub struct for_ref<'a> {
+                $($field: std::cell::Ref<'a, $type>,)*
+            }
+        });
+        
+        concat_idents::concat_idents!(for_mut = $for, Mut {
+            pub struct for_mut<'a> {
+                $($field: std::cell::RefMut<'a, $type>,)*
+            }
+        });
 
         impl crate::world::Archetype for $for {
-            type Ref<'a> = $for_ref<'a>;
-            type Mut<'a> = $for_mut<'a>;
+            concat_idents::concat_idents!(for_ref = $for, Ref {
+                type Ref<'a> = for_ref<'a>;
+
+                fn from_components<'a>(components: &'a std::collections::HashMap<std::any::TypeId, std::cell::RefCell<crate::structures::VecAny>>, indices: &[u32]) -> for_ref<'a> {
+                    let mut indices = indices.iter();
+
+                    for_ref {
+                        $($field: std::cell::Ref::map(components.get(&std::any::TypeId::of::<$type>()).unwrap().borrow(), |x| x.downcast_ref::<$type>().unwrap().get(*indices.next().unwrap() as usize).unwrap()),)*
+                    }
+                }
+            });
+            concat_idents::concat_idents!(for_mut = $for, Mut {
+                type Mut<'a> = for_mut<'a>;
+
+                fn from_components_mut<'a>(components: &'a std::collections::HashMap<std::any::TypeId, std::cell::RefCell<crate::structures::VecAny>>, indices: &[u32]) -> for_mut<'a> {
+                    let mut indices = indices.iter();
+
+                    for_mut {
+                        $($field: std::cell::RefMut::map(components.get(&std::any::TypeId::of::<$type>()).unwrap().borrow_mut(), |x| x.downcast_mut::<$type>().unwrap().get_mut(*indices.next().unwrap() as usize).unwrap()),)*
+                    }
+                }
+            });
 
             fn get_columns() -> Vec<std::any::TypeId> {
                 vec![$(std::any::TypeId::of::<$type>()),*]
@@ -89,20 +112,6 @@ macro_rules! impl_archetype {
             }
 
 
-            fn from_components<'a>(components: &'a std::collections::HashMap<std::any::TypeId, std::cell::RefCell<crate::structures::VecAny>>, indices: &[u32]) -> $for_ref<'a> {
-                let mut indices = indices.iter();
-
-                $for_ref {
-                    $($field: std::cell::Ref::map(components.get(&std::any::TypeId::of::<$type>()).unwrap().borrow(), |x| x.downcast_ref::<$type>().unwrap().get(*indices.next().unwrap() as usize).unwrap()))*
-                }
-            }
-            fn from_components_mut<'a>(components: &'a std::collections::HashMap<std::any::TypeId, std::cell::RefCell<crate::structures::VecAny>>, indices: &[u32]) -> $for_mut<'a> {
-                let mut indices = indices.iter();
-
-                $for_mut {
-                    $($field: std::cell::RefMut::map(components.get(&std::any::TypeId::of::<$type>()).unwrap().borrow_mut(), |x| x.downcast_mut::<$type>().unwrap().get_mut(*indices.next().unwrap() as usize).unwrap()))*
-                }
-            }
         }
     };
 }
