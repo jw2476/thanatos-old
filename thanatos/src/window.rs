@@ -6,7 +6,7 @@ use std::{
 use glam::Vec2;
 use winit::{
     event::{ElementState, WindowEvent},
-    event_loop::EventLoop,
+    event_loop::{ControlFlow, EventLoop},
     keyboard::{Key, SmolStr},
     platform::run_on_demand::EventLoopExtRunOnDemand,
     window::WindowBuilder,
@@ -61,6 +61,7 @@ pub struct Window {
 impl Window {
     pub fn new() -> Self {
         let event_loop = EventLoop::new().unwrap();
+        event_loop.set_control_flow(ControlFlow::Poll);
         let window = WindowBuilder::new().build(&event_loop).unwrap();
         let window = Arc::new(window);
         Self { event_loop, window }
