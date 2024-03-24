@@ -1,9 +1,12 @@
 use crate::{
+    assets::MeshId,
+    camera::Camera,
     event::Event,
-    world::{System, World}, camera::Camera, window::Window,
+    window::Window,
+    world::{System, World},
 };
 use glam::{Mat4, Vec3};
-use std::borrow::Cow;
+use std::{borrow::Cow, rc::Rc};
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -26,7 +29,7 @@ impl Vertex {
     }
 }
 
-pub struct Graphics<'a> {
+pub struct Context<'a> {
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
     surface: wgpu::Surface<'a>,
@@ -43,7 +46,7 @@ pub struct Graphics<'a> {
     camera_bind_group: wgpu::BindGroup,
 }
 
-impl<'a> Graphics<'a> {
+impl<'a> Context<'a> {
     fn get_size(window: &winit::window::Window) -> winit::dpi::PhysicalSize<u32> {
         let mut size = window.inner_size();
         size.width = size.width.max(1);
@@ -194,66 +197,65 @@ impl<'a> Graphics<'a> {
     }
 }
 
-pub struct GraphicsSystem {}
+pub fn resize_surface(world: &mut World, event: &Event) {
+    let mut ctx = world.get_mut::<Context>().unwrap();
 
-impl System for GraphicsSystem {
-    fn event(&self, world: &mut World, event: &Event) {
-        let mut ctx = world.get_mut::<Graphics>().unwrap();
-
-        match event {
-            Event::Resized(new_size) => {
-                ctx.config.width = new_size.width.max(1);
-                ctx.config.height = new_size.height.max(1);
-                ctx.surface.configure(&ctx.device, &ctx.config);
-            }
-            _ => (),
+    match event {
+        Event::Resized(new_size) => {
+            ctx.config.width = new_size.width.max(1);
+            ctx.config.height = new_size.height.max(1);
+            ctx.surface.configure(&ctx.device, &ctx.config);
         }
+        _ => (),
+    }
+}
+
+pub struct RenderObject {
+    mesh: MeshId,
+}
+
+pub fn draw(world: &mut World) {
+    let camera = world.get::<Camera>().unwrap();
+    let ctx = world.get::<Context>().unwrap();
+
+    ctx.queue.write_buffer(
+        &ctx.camera_buffer,
+        0,
+        bytemuck::cast_slice(&camera.get_matrix().to_cols_array()),
+    );
+
+    let frame = ctx
+        .surface
+        .get_current_texture()
+        .expect("Failed to acquire next swap chain texture");
+    let view = frame
+        .texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    {
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        rpass.set_pipeline(&ctx.render_pipeline);
+        rpass.set_vertex_buffer(0, ctx.vertex_buffer.slice(..));
+        rpass.set_index_buffer(ctx.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        rpass.set_bind_group(0, &ctx.camera_bind_group, &[]);
+        rpass.draw_indexed(0..3, 0, 0..1);
     }
 
-    fn tick(&self, world: &mut World) {
-        let camera = world.get::<Camera>().unwrap();
-
-        let ctx = world.get::<Graphics>().unwrap();
-
-        ctx.queue.write_buffer(
-            &ctx.camera_buffer,
-            0,
-            bytemuck::cast_slice(&camera.get_matrix().to_cols_array()),
-        );
-
-        let frame = ctx
-            .surface
-            .get_current_texture()
-            .expect("Failed to acquire next swap chain texture");
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = ctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            rpass.set_pipeline(&ctx.render_pipeline);
-            rpass.set_vertex_buffer(0, ctx.vertex_buffer.slice(..));
-            rpass.set_index_buffer(ctx.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            rpass.set_bind_group(0, &ctx.camera_bind_group, &[]);
-            rpass.draw_indexed(0..3, 0, 0..1);
-        }
-
-        ctx.queue.submit(Some(encoder.finish()));
-        frame.present();
-    }
+    ctx.queue.submit(Some(encoder.finish()));
+    frame.present();
 }

@@ -1,6 +1,6 @@
 use glam::{Mat4, Vec3};
 
-use crate::{world::World, event::Event, window::Window};
+use crate::{event::Event, window::Window, world::World};
 
 pub struct Camera {
     pub eye: Vec3,
