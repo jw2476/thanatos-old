@@ -9,10 +9,9 @@ mod world;
 use crate::{camera::Camera, window::Window, world::World};
 use assets::Mesh;
 use glam::{Quat, Vec3};
-use gltf::Glb;
-use graphics::{Context, RenderObject, Vertex};
+use graphics::{Context, RenderObject};
 use thanatos_macros::Archetype;
-use wgpu::util::DeviceExt;
+use window::{Keyboard, Mouse};
 use world::impl_archetype;
 
 #[derive(Archetype)]
@@ -22,7 +21,7 @@ struct CopperOre {
 
 #[derive(Archetype)]
 struct Tree {
-    render: RenderObject
+    render: RenderObject,
 }
 
 #[tokio::main]
@@ -40,17 +39,27 @@ async fn main() {
         .with_resource(ctx)
         .with_resource(camera)
         .with_resource(assets)
+        .with_resource(Mouse::default())
+        .with_resource(Keyboard::default())
+        .with_ticker(window::clear_mouse_delta)
         .with_ticker(window::poll_events)
         .with_handler(camera::handle_resize)
         .with_handler(graphics::resize_surface)
         .with_ticker(graphics::draw)
         .with_ticker(|world| {
             let mut camera = world.get_mut::<Camera>().unwrap();
-            camera.eye = Quat::from_rotation_y(0.01).mul_vec3(camera.eye);
-            camera.direction = -camera.eye;
-            let eye = camera.eye;
-            let direction = camera.direction;
-            camera.eye += (eye - direction) * 0.001;
+            let keyboard = world.get::<Keyboard>().unwrap();
+            let mouse = world.get::<Mouse>().unwrap();
+            let direction_xz = camera.direction * (Vec3::X + Vec3::Z).normalize();
+            let rotation = Quat::from_rotation_arc(Vec3::Z, direction_xz);
+            if keyboard.is_down("w") { camera.eye += rotation * Vec3::Z * 0.01 }
+            if keyboard.is_down("s") { camera.eye -= rotation * Vec3::Z * 0.01 }
+            if keyboard.is_down("a") { camera.eye += rotation * Vec3::X * 0.01 }
+            if keyboard.is_down("d") { camera.eye -= rotation * Vec3::X * 0.01 }
+            let rotation = Quat::from_rotation_y(-mouse.delta.x * 0.005);
+            camera.direction = rotation * camera.direction;
+            let rotation = Quat::from_rotation_x(-mouse.delta.y * 0.01);
+            camera.direction = rotation * camera.direction;
         })
         .register::<CopperOre>()
         .register::<Tree>();

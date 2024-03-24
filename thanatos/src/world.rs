@@ -202,10 +202,10 @@ impl World {
         )
     }
 
-    pub fn get_components_mut<T: Any>(&mut self) -> RefMut<'_, [T]> {
+    pub fn get_components_mut<T: Any>(&self) -> RefMut<'_, [T]> {
         RefMut::map(
             self.components
-                .get_mut(&TypeId::of::<T>())
+                .get(&TypeId::of::<T>())
                 .unwrap()
                 .borrow_mut(),
             |x| x.downcast_mut().unwrap(),
@@ -222,7 +222,7 @@ impl World {
             .collect()
     }
 
-    pub fn get_entities_mut<'a, T: Archetype>(&'a mut self) -> Vec<T::Mut<'a>> {
+    pub fn get_entities_mut<'a, T: Archetype>(&'a self) -> Vec<T::Mut<'a>> {
         let rows = &self.archetypes.get(&TypeId::of::<T>()).unwrap().rows;
 
         let mut output = Vec::new();
@@ -239,9 +239,9 @@ impl World {
             .map(|resource| Ref::map(resource.borrow(), |x| x.downcast_ref().unwrap()))
     }
 
-    pub fn get_mut<T: Any>(&mut self) -> Option<RefMut<'_, T>> {
+    pub fn get_mut<T: Any>(&self) -> Option<RefMut<'_, T>> {
         self.resources
-            .get_mut(&TypeId::of::<T>())
+            .get(&TypeId::of::<T>())
             .map(|resource| RefMut::map(resource.borrow_mut(), |x| x.downcast_mut().unwrap()))
     }
 

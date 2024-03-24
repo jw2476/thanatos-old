@@ -1,11 +1,57 @@
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    sync::Arc,
+};
 
+use glam::Vec2;
 use winit::{
-    event::WindowEvent, event_loop::EventLoop, platform::run_on_demand::EventLoopExtRunOnDemand,
+    event::{ElementState, WindowEvent},
+    event_loop::EventLoop,
+    keyboard::{Key, SmolStr},
+    platform::run_on_demand::EventLoopExtRunOnDemand,
     window::WindowBuilder,
 };
 
 use crate::{event::Event, world::World};
+
+#[derive(Clone, Default)]
+pub struct Mouse {
+    pub position: Vec2,
+    pub delta: Vec2,
+}
+
+pub fn clear_mouse_delta(world: &mut World) {
+    let mut mouse = world.get_mut::<Mouse>().unwrap();
+    mouse.delta = Vec2::ZERO;
+}
+
+#[derive(Clone, Default)]
+pub struct Keyboard {
+    down: HashSet<Key>,
+}
+
+
+impl Keyboard {
+    pub fn is_down<T: IntoKey>(&self, key: T) -> bool {
+        self.down.get(&key.into_key()).is_some()
+    }
+}
+
+pub trait IntoKey {
+    fn into_key(self) -> Key;
+}
+
+impl IntoKey for &str {
+    fn into_key(self) -> Key {
+        Key::Character(SmolStr::new_inline(self))
+    }
+}
+
+impl IntoKey for Key {
+    fn into_key(self) -> Key {
+        self
+    }
+}
 
 pub struct Window {
     event_loop: EventLoop<()>,
@@ -41,6 +87,34 @@ pub fn poll_events(world: &mut World) {
                         }
                         WindowEvent::CloseRequested => {
                             events.push(Event::Stop);
+                        }
+                        WindowEvent::KeyboardInput { event, .. } => {
+                            let mut keyboard = world.get_mut::<Keyboard>().unwrap();
+
+                            match event.state {
+                                ElementState::Pressed => {
+                                    keyboard.down.insert(event.logical_key.clone());
+                                    events.push(Event::KeyPress(event.logical_key));
+                                }
+                                ElementState::Released => {
+                                    keyboard.down.remove(&event.logical_key);
+                                    events.push(Event::KeyRelease(event.logical_key));
+                                }
+                            }
+                        }
+                        WindowEvent::MouseInput { state, button, .. } => match state {
+                            ElementState::Pressed => events.push(Event::MousePress(button)),
+                            ElementState::Released => events.push(Event::MouseRelease(button)),
+                        },
+                        WindowEvent::CursorMoved { position, .. } => {
+                            let mut mouse = world.get_mut::<Mouse>().unwrap();
+                            let position = Vec2::new(position.x as f32, position.y as f32);
+                            mouse.delta = position - mouse.position;
+                            mouse.position = position;
+                            events.push(Event::MouseMove {
+                                position,
+                                delta: mouse.delta,
+                            })
                         }
                         _ => (),
                     }
