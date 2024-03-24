@@ -3,22 +3,23 @@ use crate::{
     camera::Camera,
     event::Event,
     window::Window,
-    world::{System, World},
+    world::World,
 };
 use glam::{Mat4, Vec3};
-use std::{borrow::Cow, rc::Rc};
+use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     pub position: Vec3,
+    pub normal: Vec3,
     pub colour: Vec3,
 }
 
 impl Vertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array!(0 => Float32x3, 1 => Float32x3);
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array!(0 => Float32x3, 1 => Float32x3, 2 => Float32x3);
 
     pub const fn get_layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -29,6 +30,53 @@ impl Vertex {
     }
 }
 
+pub struct Texture {
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    pub sampler: wgpu::Sampler
+}
+
+impl Texture {
+    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    
+    pub fn create_depth_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
+        let size = wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        };
+        let desc = wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+        let texture = device.create_texture(&desc);
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(
+            &wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                compare: Some(wgpu::CompareFunction::LessEqual),
+                lod_min_clamp: 0.0,
+                lod_max_clamp: 100.0,
+                ..Default::default()
+            }
+        );
+
+        Self { texture, view, sampler }
+    }
+}
 pub struct Context<'a> {
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
@@ -37,6 +85,7 @@ pub struct Context<'a> {
     queue: wgpu::Queue,
     shader: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
+    depth_texture: Texture,
     render_pipeline: wgpu::RenderPipeline,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
@@ -128,6 +177,8 @@ impl<'a> Context<'a> {
             push_constant_ranges: &[],
         });
 
+        let depth_texture = Texture::create_depth_texture(&device, &config);
+
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(&pipeline_layout),
@@ -142,7 +193,13 @@ impl<'a> Context<'a> {
                 targets: &[Some(swapchain_format.into())],
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default()
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -154,6 +211,7 @@ impl<'a> Context<'a> {
             device,
             pipeline_layout,
             queue,
+            depth_texture,
             render_pipeline,
             shader,
             config,
@@ -172,6 +230,7 @@ pub fn resize_surface(world: &mut World, event: &Event) {
             ctx.config.width = new_size.width.max(1);
             ctx.config.height = new_size.height.max(1);
             ctx.surface.configure(&ctx.device, &ctx.config);
+            ctx.depth_texture = Texture::create_depth_texture(&ctx.device, &ctx.config);
         }
         _ => (),
     }
@@ -214,7 +273,14 @@ pub fn draw(world: &mut World) {
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: None,
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &ctx.depth_texture.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store
+                }),
+                stencil_ops: None
+            }),
             timestamp_writes: None,
             occlusion_query_set: None,
         });
@@ -222,8 +288,8 @@ pub fn draw(world: &mut World) {
         rpass.set_bind_group(0, &ctx.camera_bind_group, &[]);
         objects.into_iter().for_each(|object| {
             let mesh = assets.get_mesh(object.mesh).unwrap();
-            rpass.set_vertex_buffer(0, mesh.vertices.slice(..));
-            rpass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+            rpass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            rpass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             rpass.draw_indexed(0..mesh.num_indices, 0, 0..1);
         })
     }

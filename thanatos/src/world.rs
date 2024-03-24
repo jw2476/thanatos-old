@@ -6,9 +6,8 @@ use std::{
     rc::Rc,
 };
 
-use glam::Vec3;
 
-use crate::{assets::MeshId, event::Event, structures::VecAny};
+use crate::{event::Event, structures::VecAny};
 
 pub trait System {
     fn event(&self, world: &mut World, event: &Event);
@@ -60,11 +59,7 @@ pub trait Archetype: Any {
 }
 
 macro_rules! impl_archetype {
-    (struct $for:ident { $( $field:ident: $type:ty ),* }) => {
-        pub struct $for {
-            $($field: $type,)*
-        }
-
+    (struct $for:ident { $( $field:ident: $type:ty ),* $(,)?}) => {
         concat_idents::concat_idents!(for_ref = $for, Ref {
             pub struct for_ref<'a> {
                 $($field: std::cell::Ref<'a, $type>,)*

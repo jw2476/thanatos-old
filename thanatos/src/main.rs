@@ -6,18 +6,19 @@ mod structures;
 mod window;
 mod world;
 
-use assets::{Mesh, MeshId};
-use glam::{Mat4, Quat, Vec3};
+use crate::{camera::Camera, window::Window, world::World};
+use assets::Mesh;
+use glam::{Quat, Vec3};
+use gltf::Glb;
 use graphics::{Context, RenderObject, Vertex};
+use thanatos_macros::Archetype;
 use wgpu::util::DeviceExt;
 use world::impl_archetype;
 
-use crate::{camera::Camera, window::Window, world::World};
-
-impl_archetype!(struct Player { 
-    position: Vec3, 
-    render: RenderObject 
-});
+#[derive(Archetype)]
+struct Player {
+    render: RenderObject,
+}
 
 #[tokio::main]
 async fn main() {
@@ -25,36 +26,57 @@ async fn main() {
     let ctx = Context::new(&window).await;
     let camera = Camera::new(&window);
 
-    let vertices = [
-        Vertex {
-            position: Vec3::new(0.0, 0.5, 0.0),
-            colour: Vec3::X,
-        },
-        Vertex {
-            position: Vec3::new(-0.5, -0.5, 0.0),
-            colour: Vec3::Y,
-        },
-        Vertex {
-            position: Vec3::new(0.5, -0.5, 0.0),
-            colour: Vec3::Z,
-        },
-    ];
+    let model = Glb::load(&std::fs::read("assets/meshes/copper_ore.glb").unwrap()).unwrap();
 
-    let indices = [0, 1, 2];
+    let positions: Vec<Vec3> = bytemuck::cast_slice::<u8, f32>(
+        &model.gltf.meshes[0].primitives[0]
+            .get_attribute_data(&model, "POSITION")
+            .unwrap(),
+    )
+    .chunks(3)
+    .map(|pos| Vec3::from_slice(pos))
+    .collect();
 
-    let vertices = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice(&vertices),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let normals: Vec<Vec3> = bytemuck::cast_slice::<u8, f32>(
+        &model.gltf.meshes[0].primitives[0]
+            .get_attribute_data(&model, "NORMAL")
+            .unwrap(),
+    )
+    .chunks(3)
+    .map(|pos| Vec3::from_slice(pos))
+    .collect();
 
-    let indices = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice(&indices),
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let vertices: Vec<Vertex> = positions
+        .into_iter()
+        .zip(normals.into_iter())
+        .map(|(position, normal)| Vertex { position, normal, colour: Vec3::ONE })
+        .collect();
 
-    let mesh = Mesh { vertices, indices, num_indices: 3 };
+    let indices: Vec<u32> = model.gltf.meshes[0].primitives[0]
+        .get_indices_data(&model)
+        .unwrap();
+
+    let vertex_buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+    let index_buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+    let mesh = Mesh {
+        vertex_buffer,
+        index_buffer,
+        num_indices: indices.len() as u32,
+    };
     let mut assets = assets::Manager::new();
     let mesh = assets.add_mesh(mesh);
 
@@ -72,21 +94,10 @@ async fn main() {
             camera.eye = Quat::from_rotation_y(0.01).mul_vec3(camera.eye);
             camera.direction = -camera.eye;
         })
-        .with_ticker(|world| {
-            println!(
-                "{:?}",
-                world
-                    .get_entities::<Player>()
-                    .iter()
-                    .map(|player| &player.position)
-                    .collect::<Vec<_>>()
-            )
-        })
         .register::<Player>();
 
     world.spawn(Player {
-        position: Vec3::ONE,
-        render: RenderObject { mesh }
+        render: RenderObject { mesh },
     });
     world.run();
 }

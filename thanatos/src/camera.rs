@@ -14,7 +14,7 @@ impl Camera {
         let size = window.window.inner_size();
         let aspect = size.width as f32 / size.height as f32;
         Self {
-            eye: Vec3::ONE,
+            eye: Vec3::ONE * 3.0,
             direction: Vec3::NEG_ONE,
             fov: std::f32::consts::PI / 2.0,
             aspect,

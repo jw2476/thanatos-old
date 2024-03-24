@@ -1,8 +1,8 @@
 use wgpu::Buffer;
 
 pub struct Mesh {
-    pub vertices: Buffer,
-    pub indices: Buffer,
+    pub vertex_buffer: Buffer,
+    pub index_buffer: Buffer,
     pub num_indices: u32
 }
 #[derive(Clone, Copy, Debug)]
