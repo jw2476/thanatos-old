@@ -26,5 +26,5 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(vertex.normal, 1.0);
+    return vec4<f32>(vertex.colour * (0.5 + 0.25 * dot(vertex.normal, vec3<f32>(1.0))), 1.0);
 }
