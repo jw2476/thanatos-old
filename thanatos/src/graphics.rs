@@ -1,9 +1,9 @@
 use crate::{
-    assets::{self, MeshId},
+    assets::{self, MeshId, MaterialId},
     camera::Camera,
     event::Event,
     window::Window,
-    world::World,
+    World
 };
 use glam::{Mat4, Vec3};
 use std::borrow::Cow;
@@ -14,12 +14,11 @@ use wgpu::util::DeviceExt;
 pub struct Vertex {
     pub position: Vec3,
     pub normal: Vec3,
-    pub colour: Vec3,
 }
 
 impl Vertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array!(0 => Float32x3, 1 => Float32x3, 2 => Float32x3);
+    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array!(0 => Float32x3, 1 => Float32x3);
 
     pub const fn get_layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -91,6 +90,7 @@ pub struct Context<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    pub material_bind_group_layout: wgpu::BindGroupLayout
 }
 
 impl<'a> Context<'a> {
@@ -162,6 +162,22 @@ impl<'a> Context<'a> {
                 label: None,
             });
 
+
+        let material_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: None,
+            });
+
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &camera_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
@@ -173,7 +189,7 @@ impl<'a> Context<'a> {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&camera_bind_group_layout],
+            bind_group_layouts: &[&camera_bind_group_layout, &material_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -218,6 +234,7 @@ impl<'a> Context<'a> {
             size,
             camera_buffer,
             camera_bind_group,
+            material_bind_group_layout
         }
     }
 }
@@ -238,6 +255,7 @@ pub fn resize_surface(world: &mut World, event: &Event) {
 
 pub struct RenderObject {
     pub mesh: MeshId,
+    pub material: MaterialId
 }
 
 pub fn draw(world: &mut World) {
@@ -286,12 +304,14 @@ pub fn draw(world: &mut World) {
         });
         rpass.set_pipeline(&ctx.render_pipeline);
         rpass.set_bind_group(0, &ctx.camera_bind_group, &[]);
-        objects.into_iter().for_each(|object| {
+        for object in objects.iter() {
             let mesh = assets.get_mesh(object.mesh).unwrap();
+            let material = assets.get_material(object.material).unwrap();
             rpass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             rpass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            rpass.set_bind_group(1, &material.bind_group, &[]);
             rpass.draw_indexed(0..mesh.num_indices, 0, 0..1);
-        })
+        }
     }
 
     ctx.queue.submit(Some(encoder.finish()));

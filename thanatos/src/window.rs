@@ -12,7 +12,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{event::Event, world::World};
+use crate::{event::Event, World};
 
 #[derive(Clone, Default)]
 pub struct Mouse {

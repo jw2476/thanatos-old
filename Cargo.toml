@@ -1,7 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "gltf",
+    "gltf", 
+    "hephaestus", 
+    "tecs",
     "thanatos",
     "thanatos_macros"
 ]

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 thanatos_macros = { path = "../thanatos_macros" }
 gltf = { path = "../gltf" }
+tecs = { path = "../tecs" }
 
 bytemuck = { version = "1.15.0", features = ["derive"] }
 concat-idents = "1.1.5"

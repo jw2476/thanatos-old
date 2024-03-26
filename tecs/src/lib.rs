@@ -1,3 +1,6 @@
+mod vecany;
+pub use vecany::VecAny;
+
 use std::{
     any::{Any, TypeId},
     cell::{Ref, RefCell, RefMut},
@@ -6,39 +9,25 @@ use std::{
     rc::Rc,
 };
 
-
-use crate::{event::Event, structures::VecAny};
-
-pub trait System {
-    fn event(&self, world: &mut World, event: &Event);
-    fn tick(&self, world: &mut World);
+pub trait System<E> {
+    fn event(&self, world: &mut World<E>, event: &E);
+    fn tick(&self, world: &mut World<E>);
 }
 
 struct Handler<T>(T);
 struct Ticker<T>(T);
 
-impl<T: Fn(&mut World, &Event)> System for Handler<T> {
-    fn event(&self, world: &mut World, event: &Event) {
+impl<E, T: Fn(&mut World<E>, &E)> System<E> for Handler<T> {
+    fn event(&self, world: &mut World<E>, event: &E) {
         self.0(world, event)
     }
-    fn tick(&self, _: &mut World) {}
+    fn tick(&self, _: &mut World<E>) {}
 }
 
-impl<T: Fn(&mut World)> System for Ticker<T> {
-    fn event(&self, _: &mut World, _: &Event) {}
-    fn tick(&self, world: &mut World) {
+impl<E, T: Fn(&mut World<E>)> System<E> for Ticker<T> {
+    fn event(&self, _: &mut World<E>, _: &E) {}
+    fn tick(&self, world: &mut World<E>) {
         self.0(world)
-    }
-}
-
-pub enum State {
-    Stopped,
-    Running,
-}
-
-fn handle_stop(world: &mut World, event: &Event) {
-    if let Event::Stop = event {
-        *world.get_mut::<State>().unwrap() = State::Stopped;
     }
 }
 
@@ -58,6 +47,7 @@ pub trait Archetype: Any {
     ) -> Self::Mut<'a>;
 }
 
+#[macro_export]
 macro_rules! impl_archetype {
     (struct $for:ident { $( $field:ident: $type:ty ),* $(,)?}) => {
         concat_idents::concat_idents!(for_ref = $for, Ref {
@@ -65,18 +55,18 @@ macro_rules! impl_archetype {
                 $($field: std::cell::Ref<'a, $type>,)*
             }
         });
-        
+
         concat_idents::concat_idents!(for_mut = $for, Mut {
             pub struct for_mut<'a> {
                 $($field: std::cell::RefMut<'a, $type>,)*
             }
         });
 
-        impl crate::world::Archetype for $for {
+        impl tecs::Archetype for $for {
             concat_idents::concat_idents!(for_ref = $for, Ref {
                 type Ref<'a> = for_ref<'a>;
 
-                fn from_components<'a>(components: &'a std::collections::HashMap<std::any::TypeId, std::cell::RefCell<crate::structures::VecAny>>, indices: &[u32]) -> for_ref<'a> {
+                fn from_components<'a>(components: &'a std::collections::HashMap<std::any::TypeId, std::cell::RefCell<tecs::VecAny>>, indices: &[u32]) -> for_ref<'a> {
                     let mut indices = indices.iter();
 
                     for_ref {
@@ -87,7 +77,7 @@ macro_rules! impl_archetype {
             concat_idents::concat_idents!(for_mut = $for, Mut {
                 type Mut<'a> = for_mut<'a>;
 
-                fn from_components_mut<'a>(components: &'a std::collections::HashMap<std::any::TypeId, std::cell::RefCell<crate::structures::VecAny>>, indices: &[u32]) -> for_mut<'a> {
+                fn from_components_mut<'a>(components: &'a std::collections::HashMap<std::any::TypeId, std::cell::RefCell<tecs::VecAny>>, indices: &[u32]) -> for_mut<'a> {
                     let mut indices = indices.iter();
 
                     for_mut {
@@ -100,7 +90,7 @@ macro_rules! impl_archetype {
                 vec![$(std::any::TypeId::of::<$type>()),*]
             }
 
-            fn add_components(self, components: &mut std::collections::HashMap<std::any::TypeId, std::cell::RefCell<crate::structures::VecAny>>) {
+            fn add_components(self, components: &mut std::collections::HashMap<std::any::TypeId, std::cell::RefCell<tecs::VecAny>>) {
                 $(
                     components.get_mut(&std::any::TypeId::of::<$type>()).unwrap().borrow_mut().push(self.$field);
                 )*
@@ -110,8 +100,6 @@ macro_rules! impl_archetype {
         }
     };
 }
-
-pub(crate) use impl_archetype;
 
 struct ArchetypeTable {
     columns: Vec<TypeId>,
@@ -129,32 +117,40 @@ impl ArchetypeTable {
 
 pub struct EntityId<T>(u32, PhantomData<T>);
 
-#[derive(Default)]
-pub struct World {
+pub struct World<E> {
     archetypes: HashMap<TypeId, ArchetypeTable>,
     components: HashMap<TypeId, RefCell<VecAny>>,
-    systems: Vec<Rc<dyn System>>,
+    systems: Vec<Rc<dyn System<E>>>,
     resources: HashMap<TypeId, Rc<RefCell<dyn Any>>>,
 }
 
-impl World {
+impl<E> Default for World<E> {
+    fn default() -> Self {
+        Self {
+            archetypes: HashMap::new(),
+            components: HashMap::new(),
+            systems: Vec::new(),
+            resources: HashMap::new(),
+        }
+    }
+}
+
+impl<E> World<E> {
     pub fn new() -> Self {
         Self::default()
-            .with_resource(State::Stopped)
-            .with_handler(handle_stop)
     }
 
-    pub fn with_system<T: System + 'static>(mut self, system: T) -> Self {
+    pub fn with_system<T: System<E> + 'static>(mut self, system: T) -> Self {
         self.systems.push(Rc::new(system));
         self
     }
 
-    pub fn with_handler<T: Fn(&mut World, &Event) + 'static>(mut self, handler: T) -> Self {
+    pub fn with_handler<T: Fn(&mut World<E>, &E) + 'static>(mut self, handler: T) -> Self {
         self.systems.push(Rc::new(Handler(handler)));
         self
     }
 
-    pub fn with_ticker<T: Fn(&mut World) + 'static>(mut self, ticker: T) -> Self {
+    pub fn with_ticker<T: Fn(&mut World<E>) + 'static>(mut self, ticker: T) -> Self {
         self.systems.push(Rc::new(Ticker(ticker)));
         self
     }
@@ -245,24 +241,14 @@ impl World {
             .map(|resource| RefMut::map(resource.borrow_mut(), |x| x.downcast_mut().unwrap()))
     }
 
-    fn tick(&mut self) {
+    pub fn tick(&mut self) {
         self.systems
             .clone()
             .into_iter()
             .for_each(|system| system.tick(self))
     }
 
-    pub fn run(mut self) {
-        *self.get_mut::<State>().unwrap() = State::Running;
-        loop {
-            if let State::Stopped = *self.get_mut().unwrap() {
-                break;
-            }
-            self.tick()
-        }
-    }
-
-    pub fn submit(&mut self, event: Event) {
+    pub fn submit(&mut self, event: E) {
         self.systems
             .clone()
             .into_iter()

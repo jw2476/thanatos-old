@@ -633,6 +633,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hephaestus"
+version = "0.1.0"
+
+[[package]]
 name = "hermit-abi"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1383,6 +1387,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "tecs"
+version = "0.1.0"
+
+[[package]]
 name = "termcolor"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1399,6 +1407,7 @@ dependencies = [
  "concat-idents",
  "glam",
  "gltf",
+ "tecs",
  "thanatos_macros",
  "tokio",
  "wgpu",

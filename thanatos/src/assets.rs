@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use glam::Vec3;
+use glam::{Vec3, Vec4};
 use gltf::Glb;
-use wgpu::{util::DeviceExt, Buffer};
+use wgpu::{util::DeviceExt, BindGroup, Buffer, BufferUsages};
 
 use crate::graphics::Vertex;
 
@@ -40,7 +40,6 @@ impl Mesh {
             .map(|(position, normal)| Vertex {
                 position,
                 normal,
-                colour: Vec3::ONE,
             })
             .collect();
 
@@ -68,12 +67,50 @@ impl Mesh {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialData {
+    pub colour: Vec4,
+}
+
+pub struct Material {
+    pub buffer: Buffer,
+    pub bind_group: BindGroup,
+}
+
+impl Material {
+    pub fn load(
+        material: MaterialData,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let contents = bytemuck::bytes_of(&material);
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            contents,
+            usage: BufferUsages::UNIFORM,
+            label: None,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+           layout,
+            entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding() 
+            }],
+            label: None
+        });
+        Self { buffer, bind_group }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct MeshId(usize);
+#[derive(Clone, Copy, Debug)]
+pub struct MaterialId(usize);
 
 #[derive(Default)]
 pub struct Manager {
     meshes: Vec<Mesh>,
+    materials: Vec<Material>
 }
 
 impl Manager {
@@ -88,5 +125,15 @@ impl Manager {
 
     pub fn get_mesh(&self, id: MeshId) -> Option<&Mesh> {
         self.meshes.get(id.0)
+    }
+
+
+    pub fn add_material(&mut self, material: Material) -> MaterialId {
+        self.materials.push(material);
+        MaterialId(self.materials.len() - 1)
+    }
+
+    pub fn get_material(&self, id: MaterialId) -> Option<&Material> {
+        self.materials.get(id.0)
     }
 }
