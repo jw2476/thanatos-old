@@ -7,11 +7,12 @@ use std::{
 use ash::{
     prelude::VkResult,
     vk::{
-        self, ApplicationInfo, ColorSpaceKHR, CompositeAlphaFlagsKHR, DeviceCreateInfo,
-        DeviceQueueCreateInfo, Extent2D, Format, Image, ImageUsageFlags, InstanceCreateInfo,
-        PhysicalDeviceFeatures, PhysicalDeviceProperties, PresentModeKHR, QueueFamilyProperties,
-        QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SwapchainCreateInfoKHR,
-        SwapchainKHR, ImageView, ImageViewCreateInfo, ImageViewType, ComponentSwizzle, ComponentMappingBuilder, ComponentMapping, ImageSubresourceRange, ImageAspectFlags,
+        self, ApplicationInfo, ColorSpaceKHR, ComponentMapping, ComponentMappingBuilder,
+        ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo,
+        Extent2D, Format, Image, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags,
+        ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PresentModeKHR, QueueFamilyProperties, QueueFlags, SharingMode,
+        SurfaceCapabilitiesKHR, SurfaceFormatKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Entry,
 };
@@ -352,15 +353,26 @@ impl Device {
             .create_swapchain(&create_info, None)?;
 
         let images = self.extensions.swapchain.get_swapchain_images(handle)?;
-        let views = images.iter().map(|image| {
-            let create_info = ImageViewCreateInfo::builder()
-                .image(*image)
-                .view_type(ImageViewType::TYPE_2D)
-                .format(format.format)
-                .components(ComponentMapping::default())
-                .subresource_range(ImageSubresourceRange::builder().aspect_mask(ImageAspectFlags::COLOR).base_mip_level(0).level_count(1).base_array_layer(0).layer_count(1).build());
-            self.create_image_view(&create_info, None) 
-        }).collect::<VkResult<Vec<_>>>()?;
+        let views = images
+            .iter()
+            .map(|image| {
+                let create_info = ImageViewCreateInfo::builder()
+                    .image(*image)
+                    .view_type(ImageViewType::TYPE_2D)
+                    .format(format.format)
+                    .components(ComponentMapping::default())
+                    .subresource_range(
+                        ImageSubresourceRange::builder()
+                            .aspect_mask(ImageAspectFlags::COLOR)
+                            .base_mip_level(0)
+                            .level_count(1)
+                            .base_array_layer(0)
+                            .layer_count(1)
+                            .build(),
+                    );
+                self.create_image_view(&create_info, None)
+            })
+            .collect::<VkResult<Vec<_>>>()?;
 
         Ok(Swapchain {
             handle,
@@ -403,11 +415,20 @@ impl Context {
     }
 
     unsafe fn destroy(&self) {
-        self.swapchain.views.iter().for_each(|view| self.device.destroy_image_view(*view, None));
-        self.device.extensions.swapchain.destroy_swapchain(self.swapchain.handle, None);
+        self.swapchain
+            .views
+            .iter()
+            .for_each(|view| self.device.destroy_image_view(*view, None));
+        self.device
+            .extensions
+            .swapchain
+            .destroy_swapchain(self.swapchain.handle, None);
         self.device.destroy_device(None);
 
-        self.instance.extensions.surface.destroy_surface(self.surface.handle, None);
+        self.instance
+            .extensions
+            .surface
+            .destroy_surface(self.surface.handle, None);
         self.instance.destroy_instance(None);
     }
 }
