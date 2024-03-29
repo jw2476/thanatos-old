@@ -1,9 +1,9 @@
 use crate::{
-    assets::{self, MeshId, MaterialId},
+    assets::{self, MaterialId, MeshId},
     camera::Camera,
     event::Event,
     window::Window,
-    World
+    World,
 };
 use glam::{Mat4, Vec3};
 use std::borrow::Cow;
@@ -32,13 +32,16 @@ impl Vertex {
 pub struct Texture {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
-    pub sampler: wgpu::Sampler
+    pub sampler: wgpu::Sampler,
 }
 
 impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-    
-    pub fn create_depth_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
+
+    pub fn create_depth_texture(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+    ) -> Self {
         let size = wgpu::Extent3d {
             width: config.width,
             height: config.height,
@@ -51,29 +54,30 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         };
         let texture = device.create_texture(&desc);
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(
-            &wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                compare: Some(wgpu::CompareFunction::LessEqual),
-                lod_min_clamp: 0.0,
-                lod_max_clamp: 100.0,
-                ..Default::default()
-            }
-        );
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 100.0,
+            ..Default::default()
+        });
 
-        Self { texture, view, sampler }
+        Self {
+            texture,
+            view,
+            sampler,
+        }
     }
 }
 pub struct Context<'a> {
@@ -90,7 +94,7 @@ pub struct Context<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    pub material_bind_group_layout: wgpu::BindGroupLayout
+    pub material_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl<'a> Context<'a> {
@@ -162,7 +166,6 @@ impl<'a> Context<'a> {
                 label: None,
             });
 
-
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
@@ -214,7 +217,7 @@ impl<'a> Context<'a> {
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default()
+                bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
@@ -234,7 +237,7 @@ impl<'a> Context<'a> {
             size,
             camera_buffer,
             camera_bind_group,
-            material_bind_group_layout
+            material_bind_group_layout,
         }
     }
 }
@@ -255,7 +258,7 @@ pub fn resize_surface(world: &mut World, event: &Event) {
 
 pub struct RenderObject {
     pub mesh: MeshId,
-    pub material: MaterialId
+    pub material: MaterialId,
 }
 
 pub fn draw(world: &mut World) {
@@ -295,9 +298,9 @@ pub fn draw(world: &mut World) {
                 view: &ctx.depth_texture.view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store
+                    store: wgpu::StoreOp::Store,
                 }),
-                stencil_ops: None
+                stencil_ops: None,
             }),
             timestamp_writes: None,
             occlusion_query_set: None,

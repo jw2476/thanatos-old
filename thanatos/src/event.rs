@@ -10,6 +10,5 @@ pub enum Event {
     KeyRelease(Key),
     MousePress(MouseButton),
     MouseRelease(MouseButton),
-    MouseMove { position: Vec2, delta: Vec2 }
+    MouseMove { position: Vec2, delta: Vec2 },
 }
-

@@ -37,10 +37,7 @@ impl Mesh {
         let vertices: Vec<Vertex> = positions
             .into_iter()
             .zip(normals.into_iter())
-            .map(|(position, normal)| Vertex {
-                position,
-                normal,
-            })
+            .map(|(position, normal)| Vertex { position, normal })
             .collect();
 
         let indices: Vec<u32> = model.gltf.meshes[0].primitives[0]
@@ -91,12 +88,12 @@ impl Material {
             label: None,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-           layout,
+            layout,
             entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buffer.as_entire_binding() 
+                binding: 0,
+                resource: buffer.as_entire_binding(),
             }],
-            label: None
+            label: None,
         });
         Self { buffer, bind_group }
     }
@@ -110,7 +107,7 @@ pub struct MaterialId(usize);
 #[derive(Default)]
 pub struct Manager {
     meshes: Vec<Mesh>,
-    materials: Vec<Material>
+    materials: Vec<Material>,
 }
 
 impl Manager {
@@ -126,7 +123,6 @@ impl Manager {
     pub fn get_mesh(&self, id: MeshId) -> Option<&Mesh> {
         self.meshes.get(id.0)
     }
-
 
     pub fn add_material(&mut self, material: Material) -> MaterialId {
         self.materials.push(material);

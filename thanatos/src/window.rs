@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 use glam::Vec2;
 use winit::{
@@ -29,7 +26,6 @@ pub fn clear_mouse_delta(world: &mut World) {
 pub struct Keyboard {
     down: HashSet<Key>,
 }
-
 
 impl Keyboard {
     pub fn is_down<T: IntoKey>(&self, key: T) -> bool {
