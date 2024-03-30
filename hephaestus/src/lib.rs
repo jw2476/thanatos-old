@@ -1,21 +1,26 @@
+pub mod pipeline;
+pub mod command;
+
 use std::{
     collections::HashSet,
     ffi::{c_char, CStr, CString},
     ops::Deref,
 };
 
+pub use ash::prelude::VkResult;
 use ash::{
-    prelude::VkResult,
     vk::{
-        self, ApplicationInfo, ColorSpaceKHR, ComponentMapping, ComponentMappingBuilder,
-        ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo,
-        Extent2D, Format, Image, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags,
-        ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PresentModeKHR, QueueFamilyProperties, QueueFlags, SharingMode,
-        SurfaceCapabilitiesKHR, SurfaceFormatKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+        self, ApplicationInfo, ColorSpaceKHR, CommandBufferAllocateInfo, CommandBufferLevel,
+        CommandPoolCreateInfo, ComponentMapping, CompositeAlphaFlagsKHR, DeviceCreateInfo,
+        DeviceQueueCreateInfo, Extent2D, Format, Image, ImageAspectFlags, ImageSubresourceRange,
+        ImageUsageFlags, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo,
+        PhysicalDeviceFeatures, PhysicalDeviceProperties, PresentModeKHR, QueueFamilyProperties,
+        QueueFlags, ShaderModule, ShaderModuleCreateInfo, SharingMode, SurfaceCapabilitiesKHR,
+        SurfaceFormatKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Entry,
 };
+
 use log::{error, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
@@ -58,6 +63,54 @@ pub struct Surface {
     pub present_modes: Vec<PresentModeKHR>,
 }
 
+impl Surface {
+    pub fn new<T: HasRawDisplayHandle + HasRawWindowHandle>(
+        entry: &Entry,
+        instance: &Instance,
+        physical: &PhysicalDevice,
+        window: T,
+    ) -> VkResult<Self> {
+        unsafe {
+            let handle = ash_window::create_surface(
+                entry,
+                instance,
+                window.raw_display_handle(),
+                window.raw_window_handle(),
+                None,
+            )?;
+
+            let capabilities = instance
+                .extensions
+                .surface
+                .get_physical_device_surface_capabilities(physical.handle, handle)?;
+            let formats = instance
+                .extensions
+                .surface
+                .get_physical_device_surface_formats(physical.handle, handle)?;
+            let present_modes = instance
+                .extensions
+                .surface
+                .get_physical_device_surface_present_modes(physical.handle, handle)?;
+
+            Ok(Surface {
+                handle,
+                capabilities,
+                formats,
+                present_modes,
+            })
+        }
+    }
+
+    pub fn destroy(self, instance: &Instance) {
+        unsafe {
+            instance
+                .extensions
+                .surface
+                .destroy_surface(self.handle, None)
+        }
+    }
+}
+
 impl Instance {
     #[cfg(target_os = "linux")]
     const EXTENSIONS: &'static [&'static CStr] = &[
@@ -67,11 +120,7 @@ impl Instance {
 
     const LAYERS: &'static [&'static CStr] = &[c"VK_LAYER_KHRONOS_validation"];
 
-    pub unsafe fn new<T: HasRawDisplayHandle>(
-        entry: &Entry,
-        name: &CStr,
-        window: T,
-    ) -> VkResult<Self> {
+    pub fn new<T: HasRawDisplayHandle>(entry: &Entry, name: &CStr, window: T) -> VkResult<Self> {
         let app_info = ApplicationInfo::builder()
             .engine_name(name)
             .engine_version(vk::make_api_version(0, 1, 0, 0))
@@ -85,7 +134,7 @@ impl Instance {
             .filter(|wanted| {
                 let found = available
                     .iter()
-                    .find(|layer| CStr::from_ptr(layer.layer_name.as_ptr()) == **wanted)
+                    .find(|layer| unsafe { CStr::from_ptr(layer.layer_name.as_ptr()) } == **wanted)
                     .is_some();
                 if !found {
                     warn!("Missing validation layer: {}", wanted.to_str().unwrap())
@@ -103,7 +152,7 @@ impl Instance {
             .filter(|wanted| {
                 let found = available
                     .iter()
-                    .find(|extension| CStr::from_ptr(extension.extension_name.as_ptr()) == **wanted)
+                    .find(|extension| unsafe { CStr::from_ptr(extension.extension_name.as_ptr()) } == **wanted)
                     .is_some();
                 if !found {
                     error!("Missing extension: {}", wanted.to_str().unwrap())
@@ -119,7 +168,7 @@ impl Instance {
             .enabled_extension_names(&extensions)
             .enabled_layer_names(&layers);
 
-        let inner = entry.create_instance(&create_info, None)?;
+        let inner = unsafe { entry.create_instance(&create_info, None)? };
         let extensions = InstanceExtensions::new(entry, &inner);
         Ok(Self { inner, extensions })
     }
@@ -138,40 +187,8 @@ impl Instance {
         })
     }
 
-    pub unsafe fn get_surface<T: HasRawDisplayHandle + HasRawWindowHandle>(
-        &self,
-        entry: &Entry,
-        instance: &Instance,
-        physical: &PhysicalDevice,
-        window: T,
-    ) -> VkResult<Surface> {
-        let handle = ash_window::create_surface(
-            entry,
-            self,
-            window.raw_display_handle(),
-            window.raw_window_handle(),
-            None,
-        )?;
-
-        let capabilities = instance
-            .extensions
-            .surface
-            .get_physical_device_surface_capabilities(physical.handle, handle)?;
-        let formats = instance
-            .extensions
-            .surface
-            .get_physical_device_surface_formats(physical.handle, handle)?;
-        let present_modes = instance
-            .extensions
-            .surface
-            .get_physical_device_surface_present_modes(physical.handle, handle)?;
-
-        Ok(Surface {
-            handle,
-            capabilities,
-            formats,
-            present_modes,
-        })
+    pub fn destroy(self) {
+        unsafe { self.destroy_instance(None) }
     }
 }
 
@@ -181,8 +198,8 @@ pub struct Queue {
 }
 
 impl Queue {
-    pub unsafe fn get(device: &ash::Device, index: u32) -> Self {
-        let handle = device.get_device_queue(index, 0);
+    pub fn new(device: &ash::Device, index: u32) -> Self {
+        let handle = unsafe { device.get_device_queue(index, 0) };
         Self { handle, index }
     }
 }
@@ -211,92 +228,27 @@ impl Deref for Device {
     }
 }
 
-pub struct Swapchain {
-    handle: SwapchainKHR,
-    images: Vec<Image>,
-    views: Vec<ImageView>,
-    format: Format,
-    extent: Extent2D,
+pub struct ImageView {
+    pub handle: vk::ImageView,
+    pub extent: Extent2D,
 }
 
-impl Device {
-    const EXTENSIONS: &'static [&'static CStr] = &[ash::extensions::khr::Swapchain::name()];
-
-    pub unsafe fn new(
-        instance: &Instance,
-        physical: PhysicalDevice,
-        surface: &Surface,
-    ) -> VkResult<Self> {
-        let priorities = &[1.0];
-
-        let graphics_index = physical
-            .queue_families
-            .iter()
-            .position(|family| family.queue_flags.contains(QueueFlags::GRAPHICS))
-            .expect("No graphics capable queue families") as u32;
-        let present_index = physical
-            .queue_families
-            .iter()
-            .enumerate()
-            .position(|(i, _)| {
-                instance
-                    .extensions
-                    .surface
-                    .get_physical_device_surface_support(physical.handle, i as u32, surface.handle)
-                    .unwrap()
-            })
-            .expect("No presentation capable queue families") as u32;
-
-        let indices = HashSet::from([graphics_index, present_index]);
-        let queue_create_infos = indices
-            .into_iter()
-            .map(|index| {
-                DeviceQueueCreateInfo::builder()
-                    .queue_family_index(index)
-                    .queue_priorities(priorities)
-                    .build()
-            })
-            .collect::<Vec<_>>();
-
-        let available = instance.enumerate_device_extension_properties(physical.handle)?;
-        let extensions = Self::EXTENSIONS
-            .iter()
-            .filter(|wanted| {
-                let found = available
-                    .iter()
-                    .find(|extension| CStr::from_ptr(extension.extension_name.as_ptr()) == **wanted)
-                    .is_some();
-                if !found {
-                    error!("Missing extension: {}", wanted.to_str().unwrap())
-                }
-                found
-            })
-            .map(|name| name.as_ptr() as *const c_char)
-            .collect::<Vec<_>>();
-
-        let create_info = DeviceCreateInfo::builder()
-            .enabled_extension_names(&extensions)
-            .queue_create_infos(&queue_create_infos);
-
-        let inner = instance.create_device(physical.handle, &create_info, None)?;
-
-        let queues = Queues {
-            graphics: Queue::get(&inner, graphics_index),
-            present: Queue::get(&inner, present_index),
-        };
-
-        let swapchain = ash::extensions::khr::Swapchain::new(&instance, &inner);
-        let extensions = DeviceExtensions { swapchain };
-
-        Ok(Self {
-            inner,
-            extensions,
-            physical,
-            queues,
-        })
+impl ImageView {
+    pub fn destroy(self, device: &Device) {
+        unsafe { device.destroy_image_view(self.handle, None) };
     }
+}
 
-    pub unsafe fn get_swapchain(&self, surface: &Surface) -> VkResult<Swapchain> {
+pub struct Swapchain {
+    pub handle: SwapchainKHR,
+    pub images: Vec<Image>,
+    pub views: Vec<ImageView>,
+    pub format: Format,
+    pub extent: Extent2D,
+}
+
+impl Swapchain {
+    pub fn new(device: &Device, surface: &Surface) -> VkResult<Self> {
         let format = surface
             .formats
             .iter()
@@ -338,8 +290,8 @@ impl Device {
             .present_mode(present_mode)
             .clipped(true);
 
-        let indices = [self.queues.graphics.index, self.queues.present.index];
-        let create_info = if self.queues.graphics.index == self.queues.present.index {
+        let indices = [device.queues.graphics.index, device.queues.present.index];
+        let create_info = if device.queues.graphics.index == device.queues.present.index {
             create_info.image_sharing_mode(SharingMode::EXCLUSIVE)
         } else {
             create_info
@@ -347,13 +299,15 @@ impl Device {
                 .queue_family_indices(&indices)
         };
 
-        let handle = self
-            .extensions
-            .swapchain
-            .create_swapchain(&create_info, None)?;
+        let handle = unsafe {
+            device
+                .extensions
+                .swapchain
+                .create_swapchain(&create_info, None)?
+        };
 
-        let images = self.extensions.swapchain.get_swapchain_images(handle)?;
-        let views = images
+        let images = unsafe { device.extensions.swapchain.get_swapchain_images(handle)? };
+        let handles = images
             .iter()
             .map(|image| {
                 let create_info = ImageViewCreateInfo::builder()
@@ -370,9 +324,13 @@ impl Device {
                             .layer_count(1)
                             .build(),
                     );
-                self.create_image_view(&create_info, None)
+                unsafe { device.create_image_view(&create_info, None) }
             })
             .collect::<VkResult<Vec<_>>>()?;
+        let views = handles
+            .into_iter()
+            .map(|handle| ImageView { handle, extent })
+            .collect();
 
         Ok(Swapchain {
             handle,
@@ -382,6 +340,95 @@ impl Device {
             extent,
         })
     }
+
+    pub fn destroy(self, device: &Device) {
+        self.views.into_iter().for_each(|view| view.destroy(device));
+
+        unsafe {
+            device
+                .extensions
+                .swapchain
+                .destroy_swapchain(self.handle, None)
+        };
+    }
+}
+
+impl Device {
+    const EXTENSIONS: &'static [&'static CStr] = &[ash::extensions::khr::Swapchain::name()];
+
+    pub fn new(instance: &Instance, physical: PhysicalDevice, surface: &Surface) -> VkResult<Self> {
+        let priorities = &[1.0];
+
+        let graphics_index = physical
+            .queue_families
+            .iter()
+            .position(|family| family.queue_flags.contains(QueueFlags::GRAPHICS))
+            .expect("No graphics capable queue families") as u32;
+        let present_index = physical
+            .queue_families
+            .iter()
+            .enumerate()
+            .position(|(i, _)| unsafe {
+                instance
+                    .extensions
+                    .surface
+                    .get_physical_device_surface_support(physical.handle, i as u32, surface.handle)
+                    .unwrap()
+            })
+            .expect("No presentation capable queue families") as u32;
+
+        let indices = HashSet::from([graphics_index, present_index]);
+        let queue_create_infos = indices
+            .into_iter()
+            .map(|index| {
+                DeviceQueueCreateInfo::builder()
+                    .queue_family_index(index)
+                    .queue_priorities(priorities)
+                    .build()
+            })
+            .collect::<Vec<_>>();
+
+        let available = unsafe { instance.enumerate_device_extension_properties(physical.handle)? };
+        let extensions = Self::EXTENSIONS
+            .iter()
+            .filter(|wanted| {
+                let found = available
+                    .iter()
+                    .find(|extension| unsafe { CStr::from_ptr(extension.extension_name.as_ptr()) } == **wanted)
+                    .is_some();
+                if !found {
+                    error!("Missing extension: {}", wanted.to_str().unwrap())
+                }
+                found
+            })
+            .map(|name| name.as_ptr() as *const c_char)
+            .collect::<Vec<_>>();
+
+        let create_info = DeviceCreateInfo::builder()
+            .enabled_extension_names(&extensions)
+            .queue_create_infos(&queue_create_infos);
+
+        let inner = unsafe { instance.create_device(physical.handle, &create_info, None)? };
+
+        let queues = Queues {
+            graphics: Queue::new(&inner, graphics_index),
+            present: Queue::new(&inner, present_index),
+        };
+
+        let swapchain = ash::extensions::khr::Swapchain::new(&instance, &inner);
+        let extensions = DeviceExtensions { swapchain };
+
+        Ok(Self {
+            inner,
+            extensions,
+            physical,
+            queues,
+        })
+    }
+
+    pub fn destroy(self) {
+        unsafe { self.destroy_device(None) }
+    }
 }
 
 pub struct Context {
@@ -390,6 +437,7 @@ pub struct Context {
     pub surface: Surface,
     pub device: Device,
     pub swapchain: Swapchain,
+    pub command_pool: command::Pool,
 }
 
 impl Context {
@@ -399,11 +447,12 @@ impl Context {
     ) -> VkResult<Self> {
         let entry = Entry::linked();
         let name = CString::new(name).unwrap();
-        let instance = unsafe { Instance::new(&entry, &name, &window)? };
+        let instance = Instance::new(&entry, &name, &window)?;
         let physical = unsafe { instance.get_physical_device()? };
-        let surface = unsafe { instance.get_surface(&entry, &instance, &physical, window)? };
-        let device = unsafe { Device::new(&instance, physical, &surface)? };
-        let swapchain = unsafe { device.get_swapchain(&surface)? };
+        let surface = Surface::new(&entry, &instance, &physical, window)?;
+        let device = Device::new(&instance, physical, &surface)?;
+        let swapchain = Swapchain::new(&device, &surface)?;
+        let command_pool = command::Pool::new(&device, &device.queues.graphics)?;
 
         Ok(Self {
             entry,
@@ -411,30 +460,15 @@ impl Context {
             surface,
             device,
             swapchain,
+            command_pool,
         })
     }
 
-    unsafe fn destroy(&self) {
-        self.swapchain
-            .views
-            .iter()
-            .for_each(|view| self.device.destroy_image_view(*view, None));
-        self.device
-            .extensions
-            .swapchain
-            .destroy_swapchain(self.swapchain.handle, None);
-        self.device.destroy_device(None);
-
-        self.instance
-            .extensions
-            .surface
-            .destroy_surface(self.surface.handle, None);
-        self.instance.destroy_instance(None);
-    }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        unsafe { self.destroy() }
+    pub fn destroy(self) {
+        self.command_pool.destroy(&self.device);
+        self.swapchain.destroy(&self.device);
+        self.device.destroy();
+        self.surface.destroy(&self.instance);
+        self.instance.destroy();
     }
 }

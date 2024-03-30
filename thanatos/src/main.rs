@@ -9,7 +9,12 @@ use assets::{Material, MaterialData, Mesh};
 use event::Event;
 use glam::{Quat, Vec3, Vec4};
 use graphics::RenderObject;
-use hephaestus::Context;
+use hephaestus::{
+    pipeline::{
+        self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass,
+    },
+    Context, VkResult,
+};
 use log::warn;
 use tecs::impl_archetype;
 use thanatos_macros::Archetype;
@@ -39,7 +44,62 @@ async fn main() {
 
     let window = Window::new();
     let ctx = Context::new("thanatos", &window.window).unwrap();
-    warn!("{}", ctx.device.queues.graphics.index);
+
+    let vertex = ShaderModule::new(
+        &ctx.device,
+        &std::fs::read("assets/shaders/shader.vert.spv").unwrap(),
+    )
+    .unwrap();
+
+    let fragment = ShaderModule::new(
+        &ctx.device,
+        &std::fs::read("assets/shaders/shader.frag.spv").unwrap(),
+    )
+    .unwrap();
+
+    let render_pass = {
+        let mut builder = RenderPass::builder();
+        let attachment = builder.attachment(
+            ctx.swapchain.format,
+            ImageLayout::UNDEFINED,
+            ImageLayout::PRESENT_SRC_KHR,
+        );
+        builder.subpass(
+            Subpass::new(PipelineBindPoint::GRAPHICS)
+                .colour(attachment, ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+        );
+        builder.build(&ctx.device).unwrap()
+    };
+
+    let pipeline = pipeline::Graphics::builder()
+        .vertex(&vertex)
+        .fragment(&fragment)
+        .render_pass(&render_pass)
+        .subpass(0)
+        .viewport(
+            ctx.swapchain.extent.width as f32,
+            ctx.swapchain.extent.height as f32,
+        )
+        .build(&ctx.device)
+        .unwrap();
+
+    let framebuffers = ctx
+        .swapchain
+        .views
+        .iter()
+        .map(|view| render_pass.get_framebuffer(&ctx.device, &[view]))
+        .collect::<VkResult<Vec<Framebuffer>>>()
+        .unwrap();
+
+    framebuffers
+        .into_iter()
+        .for_each(|framebuffer| framebuffer.destroy(&ctx.device));
+
+    pipeline.destroy(&ctx.device);
+    render_pass.destroy(&ctx.device);
+    vertex.destroy(&ctx.device);
+    fragment.destroy(&ctx.device);
+    ctx.destroy();
 
     /*
         let ctx = Context::new(&window).await;

@@ -701,6 +701,7 @@ version = "0.1.0"
 dependencies = [
  "ash",
  "ash-window",
+ "bytemuck",
  "log",
  "raw-window-handle 0.5.2",
 ]
