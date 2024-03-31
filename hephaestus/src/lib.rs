@@ -1,5 +1,6 @@
 pub mod pipeline;
 pub mod command;
+pub mod task;
 
 use std::{
     collections::HashSet,
@@ -8,14 +9,14 @@ use std::{
 };
 
 pub use ash::prelude::VkResult;
+pub use ash::vk::{ClearValue, ClearColorValue, PipelineStageFlags};
 use ash::{
     vk::{
-        self, ApplicationInfo, ColorSpaceKHR, CommandBufferAllocateInfo, CommandBufferLevel,
-        CommandPoolCreateInfo, ComponentMapping, CompositeAlphaFlagsKHR, DeviceCreateInfo,
+        self, ApplicationInfo, ColorSpaceKHR, ComponentMapping, CompositeAlphaFlagsKHR, DeviceCreateInfo,
         DeviceQueueCreateInfo, Extent2D, Format, Image, ImageAspectFlags, ImageSubresourceRange,
         ImageUsageFlags, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo,
         PhysicalDeviceFeatures, PhysicalDeviceProperties, PresentModeKHR, QueueFamilyProperties,
-        QueueFlags, ShaderModule, ShaderModuleCreateInfo, SharingMode, SurfaceCapabilitiesKHR,
+        QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
         SurfaceFormatKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Entry,

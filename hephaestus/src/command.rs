@@ -1,6 +1,6 @@
 use ash::{
     prelude::VkResult,
-    vk::{self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPoolCreateInfo, Extent2D, Offset2D, PipelineBindPoint, Rect2D, RenderPassBeginInfo, SubpassContents},
+    vk::{self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPoolCreateInfo, Offset2D, PipelineBindPoint, Rect2D, RenderPassBeginInfo, SubpassContents},
 };
 
 use crate::{pipeline::{Framebuffer, Graphics, RenderPass}, Device, Queue};
@@ -15,6 +15,11 @@ impl Buffer {
         unsafe { device.begin_command_buffer(self.handle, &begin_info)? };
         Ok(Recorder { buffer: self, device })
     }
+
+    pub fn destroy(self, device: &Device, pool: &Pool) {
+        let buffers = [self.handle];
+        unsafe { device.free_command_buffers(pool.handle, &buffers) }
+    }
 }
 
 pub struct Recorder<'a> {
@@ -28,7 +33,7 @@ impl Recorder<'_> {
         Ok(self.buffer)
     }
 
-    pub fn begin_render_pass(self, render_pass: RenderPass, framebuffer: Framebuffer, clear_values: &[ClearValue]) -> Self {
+    pub fn begin_render_pass(self, render_pass: &RenderPass, framebuffer: &Framebuffer, clear_values: &[ClearValue]) -> Self {
         let render_pass_begin = RenderPassBeginInfo::builder()
             .render_pass(render_pass.handle)
             .framebuffer(framebuffer.handle)
@@ -38,7 +43,12 @@ impl Recorder<'_> {
         self
     }
 
-    pub fn bind_graphics_pipeline(self, pipeline: Graphics) -> Self {
+    pub fn end_render_pass(self) -> Self {
+        unsafe { self.device.cmd_end_render_pass(self.buffer.handle) };
+        self
+    }
+
+    pub fn bind_graphics_pipeline(self, pipeline: &Graphics) -> Self {
         unsafe { self.device.cmd_bind_pipeline(self.buffer.handle, PipelineBindPoint::GRAPHICS, pipeline.handle) };
         self
     }

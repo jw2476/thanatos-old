@@ -2,10 +2,8 @@ use std::path::Path;
 
 use glam::{Vec3, Vec4};
 use gltf::Glb;
-use wgpu::{util::DeviceExt, BindGroup, Buffer, BufferUsages};
 
-use crate::graphics::Vertex;
-
+/*
 pub struct Mesh {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
@@ -133,3 +131,4 @@ impl Manager {
         self.materials.get(id.0)
     }
 }
+*/

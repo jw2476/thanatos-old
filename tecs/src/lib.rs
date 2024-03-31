@@ -241,6 +241,14 @@ impl<E> World<E> {
             .map(|resource| RefMut::map(resource.borrow_mut(), |x| x.downcast_mut().unwrap()))
     }
 
+    pub fn take<T: Any>(&mut self) -> Option<T> {
+        self.resources.remove(&TypeId::of::<T>()).and_then(|rc| {
+            let ptr: *const RefCell<dyn Any> = Rc::into_raw(rc);
+            let ptr: *const RefCell<T> = ptr.cast();
+            unsafe { Rc::into_inner(Rc::from_raw(ptr)).map(|x| x.into_inner()) }
+        })
+    }
+
     pub fn tick(&mut self) {
         self.systems
             .clone()
