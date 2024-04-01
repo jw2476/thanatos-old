@@ -59,6 +59,7 @@ pub struct PhysicalDevice {
 
 pub struct Surface {
     pub handle: vk::SurfaceKHR,
+    pub extent: Extent2D,
     pub capabilities: SurfaceCapabilitiesKHR,
     pub formats: Vec<SurfaceFormatKHR>,
     pub present_modes: Vec<PresentModeKHR>,
@@ -70,6 +71,7 @@ impl Surface {
         instance: &Instance,
         physical: &PhysicalDevice,
         window: T,
+        extent: (u32, u32)
     ) -> VkResult<Self> {
         unsafe {
             let handle = ash_window::create_surface(
@@ -98,6 +100,7 @@ impl Surface {
                 capabilities,
                 formats,
                 present_modes,
+                extent: Extent2D { width: extent.0, height: extent.1 }
             })
         }
     }
@@ -267,7 +270,7 @@ impl Swapchain {
             .unwrap_or(PresentModeKHR::FIFO);
 
         let extent = if surface.capabilities.current_extent.width == u32::MAX {
-            todo!()
+            surface.extent
         } else {
             surface.capabilities.current_extent
         };
@@ -445,12 +448,13 @@ impl Context {
     pub fn new<T: HasRawWindowHandle + HasRawDisplayHandle>(
         name: &str,
         window: T,
+        extent: (u32, u32)
     ) -> VkResult<Self> {
         let entry = Entry::linked();
         let name = CString::new(name).unwrap();
         let instance = Instance::new(&entry, &name, &window)?;
         let physical = unsafe { instance.get_physical_device()? };
-        let surface = Surface::new(&entry, &instance, &physical, window)?;
+        let surface = Surface::new(&entry, &instance, &physical, window, extent)?;
         let device = Device::new(&instance, physical, &surface)?;
         let swapchain = Swapchain::new(&device, &surface)?;
         let command_pool = command::Pool::new(&device, &device.queues.graphics)?;
