@@ -1,9 +1,12 @@
+use std::collections::VecDeque;
+
 use crate::{window::Window, World};
 use hephaestus::{
+    command,
     pipeline::{
         self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass,
     },
-    task::Task,
+    task::{Fence, Task},
     ClearColorValue, ClearValue, Context, PipelineStageFlags, VkResult,
 };
 
@@ -12,9 +15,12 @@ pub struct Renderer {
     render_pass: RenderPass,
     pipeline: pipeline::Graphics,
     framebuffers: Vec<Framebuffer>,
+    tasks: VecDeque<(Task, command::Buffer, Fence)>,
 }
 
 impl Renderer {
+    pub const FRAMES_IN_FLIGHT: usize = 3;
+
     pub fn new(window: &Window) -> VkResult<Self> {
         let ctx = Context::new("thanatos", &window.window)?;
 
@@ -68,10 +74,16 @@ impl Renderer {
             render_pass,
             pipeline,
             framebuffers,
+            tasks: VecDeque::new(),
         })
     }
 
     pub fn destroy(self) {
+        unsafe { self.ctx.device.device_wait_idle().unwrap() };
+        self.tasks.into_iter().for_each(|(task, cmd, _)| {
+            cmd.destroy(&self.ctx.device, &self.ctx.command_pool);
+            task.destroy(&self.ctx.device);
+        });
         self.framebuffers
             .into_iter()
             .for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
@@ -82,7 +94,14 @@ impl Renderer {
 }
 
 pub fn draw(world: &mut World) {
-    let renderer = world.get::<Renderer>().unwrap();
+    let mut renderer = world.get_mut::<Renderer>().unwrap();
+    if renderer.tasks.len() > Renderer::FRAMES_IN_FLIGHT {
+        let (task, cmd, fence) = renderer.tasks.pop_front().unwrap();
+        fence.wait(&renderer.ctx.device).unwrap();
+        cmd.destroy(&renderer.ctx.device, &renderer.ctx.command_pool);
+        task.destroy(&renderer.ctx.device);
+    }
+
     let mut task = Task::new();
     let (image_available, image_index) = task
         .acquire_next_image(&renderer.ctx.device, &renderer.ctx.swapchain)
@@ -129,7 +148,5 @@ pub fn draw(world: &mut World) {
     )
     .unwrap();
 
-    in_flight.wait(&renderer.ctx.device).unwrap();
-    cmd.destroy(&renderer.ctx.device, &renderer.ctx.command_pool);
-    task.destroy(&renderer.ctx.device);
+    renderer.tasks.push_back((task, cmd, in_flight));
 }
