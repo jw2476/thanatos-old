@@ -1,9 +1,15 @@
 use ash::{
     prelude::VkResult,
-    vk::{self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPoolCreateInfo, Extent2D, Offset2D, PipelineBindPoint, Rect2D, RenderPassBeginInfo, SubpassContents, Viewport},
+    vk::{self, BufferCopy, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPoolCreateInfo, Extent2D, IndexType, Offset2D, PipelineBindPoint, Rect2D, RenderPassBeginInfo, SubpassContents, Viewport},
 };
 
 use crate::{buffer, pipeline::{Framebuffer, Graphics, RenderPass}, Device, Queue};
+
+pub struct Region {
+    pub from_offset: usize,
+    pub to_offset: usize,
+    pub size: usize
+}
 
 pub struct Buffer {
     pub handle: vk::CommandBuffer,
@@ -58,6 +64,11 @@ impl Recorder<'_> {
         self
     }
 
+    pub fn draw_indexed(self, indices: u32, instances: u32, first_index: u32, vertex_offset: i32, first_instance: u32) -> Self {
+        unsafe { self.device.cmd_draw_indexed(self.buffer.handle, indices, instances, first_index, vertex_offset, first_instance) }
+        self
+    }
+
     pub fn set_viewport(self, width: u32, height: u32) -> Self {
         let viewport = Viewport::builder()
             .x(0.0)
@@ -82,8 +93,22 @@ impl Recorder<'_> {
         self
     }
 
-    pub fn bind_vertex_buffer(self, buffer: &buffer::Buffer, binding: u32) -> Self {
-        unsafe { self.device.cmd_bind_vertex_buffers(self.buffer.handle, binding, &[buffer.handle], &[0]) }
+    pub fn bind_vertex_buffer<T: buffer::Buffer>(self, buffer: &T, binding: u32) -> Self {
+        unsafe { self.device.cmd_bind_vertex_buffers(self.buffer.handle, binding, &[buffer.buffer()], &[0]) }
+        self
+    }
+
+    pub fn bind_index_buffer<T: buffer::Buffer>(self, buffer: &T) -> Self {
+        unsafe { self.device.cmd_bind_index_buffer(self.buffer.handle, buffer.buffer(), 0, IndexType::UINT32) }
+        self
+    }
+
+    pub fn copy_buffer<A: buffer::Buffer, B: buffer::Buffer>(self, from: &A, to: &B, region: Region) -> Self {
+        let region = BufferCopy::builder()
+            .src_offset(region.from_offset as u64)
+            .dst_offset(region.to_offset as u64)
+            .size(region.size as u64);
+        unsafe { self.device.cmd_copy_buffer(self.buffer.handle, from.buffer(), to.buffer(), &[*region]) }
         self
     }
 }

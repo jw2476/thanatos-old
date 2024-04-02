@@ -4,7 +4,7 @@ use crate::{window::Window, World};
 use bytemuck::offset_of;
 use glam::{Vec2, Vec3};
 use hephaestus::{
-    buffer::Buffer,
+    buffer::Static,
     command,
     pipeline::{
         self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass,
@@ -12,8 +12,7 @@ use hephaestus::{
     },
     task::{Fence, Semaphore, SubmitInfo, Task},
     vertex::{self, AttributeType},
-    BufferUsageFlags, ClearColorValue, ClearValue, Context, Extent2D, MemoryPropertyFlags,
-    PipelineStageFlags, VkResult,
+    BufferUsageFlags, ClearColorValue, ClearValue, Context, Extent2D, PipelineStageFlags, VkResult,
 };
 use log::info;
 
@@ -46,7 +45,8 @@ pub struct Renderer {
     semaphores: Vec<Semaphore>,
     frame_index: usize,
     tasks: VecDeque<Frame>,
-    vertex_buffer: Buffer,
+    vertex_buffer: Static,
+    index_buffer: Static
 }
 
 impl Renderer {
@@ -105,28 +105,29 @@ impl Renderer {
 
         let vertices = [
             Vertex {
-                pos: Vec2::new(0.0, -0.5),
+                pos: Vec2::new(-0.5, -0.5),
                 colour: Vec3::X,
             },
             Vertex {
-                pos: Vec2::new(0.5, 0.5),
+                pos: Vec2::new(0.5, -0.5),
                 colour: Vec3::Y,
             },
             Vertex {
-                pos: Vec2::new(-0.5, 0.5),
+                pos: Vec2::new(0.5, 0.5),
                 colour: Vec3::Z,
             },
+            Vertex {
+                pos: Vec2::new(-0.5, 0.5),
+                colour: Vec3::ONE
+            }
         ];
-        let vertices_data = bytemuck::cast_slice::<Vertex, u8>(&vertices);
 
-        let vertex_buffer = Buffer::new(
-            &ctx.instance,
-            &ctx.device,
-            vertices_data.len(),
-            BufferUsageFlags::VERTEX_BUFFER,
-            MemoryPropertyFlags::HOST_COHERENT | MemoryPropertyFlags::HOST_VISIBLE,
-        )?;
-        vertex_buffer.write(&ctx.device, vertices_data)?;
+        let indices = [0, 1, 2, 2, 3, 0];
+
+        let vertices_data = bytemuck::cast_slice::<Vertex, u8>(&vertices);
+        let indices_data = bytemuck::cast_slice::<u32, u8>(&indices);
+        let vertex_buffer = Static::new(&ctx, vertices_data, BufferUsageFlags::VERTEX_BUFFER)?;
+        let index_buffer = Static::new(&ctx, indices_data, BufferUsageFlags::INDEX_BUFFER)?;
 
         Ok(Self {
             ctx,
@@ -136,7 +137,8 @@ impl Renderer {
             semaphores,
             frame_index: 0,
             tasks: VecDeque::new(),
-            vertex_buffer
+            vertex_buffer,
+            index_buffer
         })
     }
 
@@ -150,6 +152,7 @@ impl Renderer {
             .into_iter()
             .for_each(|semaphore| semaphore.destroy(&self.ctx.device));
         self.vertex_buffer.destroy(&self.ctx.device);
+        self.index_buffer.destroy(&self.ctx.device);
         self.framebuffers
             .into_iter()
             .for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
@@ -237,7 +240,8 @@ pub fn draw(world: &mut World) {
         .set_viewport(size.width, size.height)
         .set_scissor(size.width, size.height)
         .bind_vertex_buffer(&renderer.vertex_buffer, 0)
-        .draw(3, 1, 0, 0)
+        .bind_index_buffer(&renderer.index_buffer)
+        .draw_indexed(6, 1, 0, 0, 0)
         .end_render_pass()
         .end()
         .unwrap();
