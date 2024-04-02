@@ -1,17 +1,7 @@
 use ash::{
     prelude::VkResult,
     vk::{
-        self, AttachmentDescription, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp,
-        ColorComponentFlags, CullModeFlags, Extent2D, Format, FramebufferCreateInfo, FrontFace,
-        GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
-        PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo,
-        PipelineDepthStencilStateCreateInfo, PipelineDynamicStateCreateInfo,
-        PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateInfo,
-        PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateInfo,
-        PipelineShaderStageCreateInfo, PipelineVertexInputStateCreateInfo,
-        PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D,
-        RenderPassCreateInfo, Result, SampleCountFlags, ShaderModuleCreateInfo, ShaderStageFlags,
-        SubpassDescription, Viewport,
+        self, AttachmentDescription, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, ColorComponentFlags, CullModeFlags, DynamicState, Extent2D, Format, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineDepthStencilStateCreateInfo, PipelineDynamicStateCreateInfo, PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateInfo, PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPassCreateInfo, Result, SampleCountFlags, ShaderModuleCreateInfo, ShaderStageFlags, SubpassDescription
     },
 };
 use log::error;
@@ -39,7 +29,7 @@ impl ShaderModule {
 
 pub struct Framebuffer {
     pub handle: vk::Framebuffer,
-    pub extent: Extent2D
+    pub extent: Extent2D,
 }
 
 impl Framebuffer {
@@ -183,11 +173,16 @@ impl Graphics {
     }
 }
 
+pub enum Viewport {
+    Dynamic,
+    Fixed(u32, u32),
+}
+
 #[derive(Default)]
 pub struct GraphicsBuilder<'a> {
     vertex: Option<&'a ShaderModule>,
     fragment: Option<&'a ShaderModule>,
-    viewport: Option<(f32, f32)>,
+    viewport: Option<Viewport>,
     render_pass: Option<&'a RenderPass>,
     subpass: Option<u32>,
 }
@@ -203,8 +198,8 @@ impl<'a> GraphicsBuilder<'a> {
         self
     }
 
-    pub fn viewport(mut self, width: f32, height: f32) -> Self {
-        self.viewport = Some((width, height));
+    pub fn viewport(mut self, viewport: Viewport) -> Self {
+        self.viewport = Some(viewport);
         self
     }
 
@@ -231,31 +226,40 @@ impl<'a> GraphicsBuilder<'a> {
             .build();
         let stages = [vertex_stage, fragment_stage];
 
-        let dynamic_state = PipelineDynamicStateCreateInfo::default();
+        let viewport = self.viewport.expect("Missing viewport");
+        let mut dynamic_states = Vec::new();
+        if let Viewport::Dynamic = viewport {
+            dynamic_states.push(DynamicState::VIEWPORT);
+            dynamic_states.push(DynamicState::SCISSOR);
+        }
+        let dynamic_state = PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
         let vertex_input = PipelineVertexInputStateCreateInfo::default();
         let input_assembly = PipelineInputAssemblyStateCreateInfo::builder()
             .topology(PrimitiveTopology::TRIANGLE_LIST)
             .primitive_restart_enable(false);
 
-        let viewport = self.viewport.expect("Missing viewport");
-        let scissor = Rect2D::builder()
-            .offset(Offset2D::default())
-            .extent(Extent2D {
-                width: viewport.0 as u32,
-                height: viewport.1 as u32,
-            })
-            .build();
-        let viewport = Viewport::builder()
-            .x(0.0)
-            .y(0.0)
-            .width(viewport.0)
-            .height(viewport.1)
-            .min_depth(0.0)
-            .max_depth(1.0)
-            .build();
 
-        let viewports = [viewport];
-        let scissors = [scissor];
+        let (viewports, scissors) = match viewport {
+            Viewport::Fixed(width, height) => {
+                let scissor = Rect2D::builder()
+                    .offset(Offset2D::default())
+                    .extent(Extent2D {
+                        width,
+                        height,
+                    })
+                    .build();
+                let viewport = vk::Viewport::builder()
+                    .x(0.0)
+                    .y(0.0)
+                    .width(width as f32)
+                    .height(height as f32)
+                    .min_depth(0.0)
+                    .max_depth(1.0)
+                    .build();
+                (vec![viewport], vec![scissor])
+            }
+            Viewport::Dynamic => (vec![vk::Viewport::default()], vec![Rect2D::default()]),
+        };
         let viewport_state = PipelineViewportStateCreateInfo::builder()
             .viewports(&viewports)
             .scissors(&scissors);

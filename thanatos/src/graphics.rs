@@ -2,13 +2,11 @@ use std::collections::VecDeque;
 
 use crate::{window::Window, World};
 use hephaestus::{
-    command,
-    pipeline::{
-        self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass,
-    },
-    task::{Fence, Semaphore, SubmitInfo, Task},
-    ClearColorValue, ClearValue, Context, PipelineStageFlags, VkResult,
+    command, pipeline::{
+        self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass, Viewport,
+    }, task::{Fence, Semaphore, SubmitInfo, Task}, ClearColorValue, ClearValue, Context, Extent2D, PipelineStageFlags, Swapchain, VkResult
 };
+use log::info;
 
 pub struct Frame {
     task: Task,
@@ -62,10 +60,7 @@ impl Renderer {
             .fragment(&fragment)
             .render_pass(&render_pass)
             .subpass(0)
-            .viewport(
-                ctx.swapchain.extent.width as f32,
-                ctx.swapchain.extent.height as f32,
-            )
+            .viewport(Viewport::Dynamic)
             .build(&ctx.device)?;
 
         vertex.destroy(&ctx.device);
@@ -109,6 +104,19 @@ impl Renderer {
         self.render_pass.destroy(&self.ctx.device);
         self.ctx.destroy();
     }
+
+    pub fn recreate_swapchain(&mut self, size: (u32, u32)) -> VkResult<()> {
+        self.ctx.surface.extent = Extent2D { width: size.0, height: size.1 };
+        self.ctx.recreate_swapchain().unwrap();
+        self.framebuffers.drain(..).for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
+        self.framebuffers = self.ctx
+            .swapchain
+            .views
+            .iter()
+            .map(|view| self.render_pass.get_framebuffer(&self.ctx.device, &[view]))
+            .collect::<VkResult<Vec<Framebuffer>>>()?;
+        Ok(())
+    }
 }
 
 pub fn draw(world: &mut World) {
@@ -124,15 +132,26 @@ pub fn draw(world: &mut World) {
 
     let mut task = Task::new();
     let image_available = task.semaphore(&renderer.ctx.device).unwrap();
-    let render_finished = renderer.semaphores[renderer.frame_index % Renderer::FRAMES_IN_FLIGHT].clone();
+    let render_finished =
+        renderer.semaphores[renderer.frame_index % Renderer::FRAMES_IN_FLIGHT].clone();
     let in_flight = task.fence(&renderer.ctx.device).unwrap();
-    let image_index = task
+    let (image_index, suboptimal) = task
         .acquire_next_image(
             &renderer.ctx.device,
             &renderer.ctx.swapchain,
             image_available.clone(),
-        )
-        .unwrap();
+        ).unwrap();
+
+    let window = world.get::<Window>().unwrap();
+    let size = window.window.inner_size();
+
+    if suboptimal {
+        info!("Recreating swapchain...");
+        unsafe { renderer.ctx.device.device_wait_idle().unwrap() };
+        renderer.recreate_swapchain((size.width, size.height)).unwrap();
+        task.destroy(&renderer.ctx.device);
+        return
+    }
 
     let clear_value = ClearValue {
         color: ClearColorValue {
@@ -153,6 +172,8 @@ pub fn draw(world: &mut World) {
             &[clear_value],
         )
         .bind_graphics_pipeline(&renderer.pipeline)
+        .set_viewport(size.width, size.height)
+        .set_scissor(size.width, size.height)
         .draw(3, 1, 0, 0)
         .end_render_pass()
         .end()
@@ -176,7 +197,11 @@ pub fn draw(world: &mut World) {
     )
     .unwrap();
 
-    renderer.tasks.push_back( Frame { task, cmd, fence: in_flight });
+    renderer.tasks.push_back(Frame {
+        task,
+        cmd,
+        fence: in_flight,
+    });
 
     renderer.frame_index += 1;
 }

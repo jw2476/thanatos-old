@@ -86,8 +86,8 @@ impl Task {
         device: &Device,
         swapchain: &Swapchain,
         signal: Semaphore,
-    ) -> VkResult<u32> {
-        let (image_index, _) = unsafe {
+    ) -> VkResult<(u32, bool)> {
+        let (image_index, suboptimal) = unsafe {
             device.extensions.swapchain.acquire_next_image(
                 swapchain.handle,
                 u64::MAX,
@@ -95,7 +95,7 @@ impl Task {
                 vk::Fence::null(),
             )?
         };
-        Ok(image_index)
+        Ok((image_index, suboptimal))
     }
 
     pub fn submit(&mut self, info: SubmitInfo) -> VkResult<()> {

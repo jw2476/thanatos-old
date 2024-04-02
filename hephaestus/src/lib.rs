@@ -9,11 +9,11 @@ use std::{
 };
 
 pub use ash::prelude::VkResult;
-pub use ash::vk::{ClearValue, ClearColorValue, PipelineStageFlags};
+pub use ash::vk::{ClearValue, ClearColorValue, PipelineStageFlags, Extent2D};
 use ash::{
     vk::{
         self, ApplicationInfo, ColorSpaceKHR, ComponentMapping, CompositeAlphaFlagsKHR, DeviceCreateInfo,
-        DeviceQueueCreateInfo, Extent2D, Format, Image, ImageAspectFlags, ImageSubresourceRange,
+        DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
         ImageUsageFlags, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo,
         PhysicalDeviceFeatures, PhysicalDeviceProperties, PresentModeKHR, QueueFamilyProperties,
         QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
@@ -345,8 +345,8 @@ impl Swapchain {
         })
     }
 
-    pub fn destroy(self, device: &Device) {
-        self.views.into_iter().for_each(|view| view.destroy(device));
+    pub(crate) fn delete(&mut self, device: &Device) {
+        self.views.drain(..).for_each(|view| view.destroy(device));
 
         unsafe {
             device
@@ -354,6 +354,10 @@ impl Swapchain {
                 .swapchain
                 .destroy_swapchain(self.handle, None)
         };
+    }
+
+    pub fn destroy(mut self, device: &Device) {
+        self.delete(device);
     }
 }
 
@@ -467,6 +471,13 @@ impl Context {
             swapchain,
             command_pool,
         })
+    }
+
+
+    pub fn recreate_swapchain(&mut self) -> VkResult<()> {
+        self.swapchain.delete(&self.device);
+        self.swapchain = Swapchain::new(&self.device, &self.surface)?;
+        Ok(())
     }
 
     pub fn destroy(self) {

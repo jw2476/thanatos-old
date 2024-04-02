@@ -1,6 +1,6 @@
 use ash::{
     prelude::VkResult,
-    vk::{self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPoolCreateInfo, Offset2D, PipelineBindPoint, Rect2D, RenderPassBeginInfo, SubpassContents},
+    vk::{self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPoolCreateInfo, Extent2D, Offset2D, PipelineBindPoint, Rect2D, RenderPassBeginInfo, SubpassContents, Viewport},
 };
 
 use crate::{pipeline::{Framebuffer, Graphics, RenderPass}, Device, Queue};
@@ -55,6 +55,30 @@ impl Recorder<'_> {
 
     pub fn draw(self, vertices: u32, instances: u32, first_vertex: u32, first_instance: u32) -> Self {
         unsafe { self.device.cmd_draw(self.buffer.handle, vertices, instances, first_vertex, first_instance) };
+        self
+    }
+
+    pub fn set_viewport(self, width: u32, height: u32) -> Self {
+        let viewport = Viewport::builder()
+            .x(0.0)
+            .y(0.0)
+            .width(width as f32)
+            .height(height as f32)
+            .min_depth(0.0)
+            .max_depth(1.0)
+            .build();
+        let viewports = [viewport];
+        unsafe { self.device.cmd_set_viewport(self.buffer.handle, 0, &viewports) }
+        self
+    } 
+
+    pub fn set_scissor(self, width: u32, height: u32) -> Self {
+        let scissor = Rect2D::builder()
+            .offset(Offset2D { x: 0, y: 0 })
+            .extent(Extent2D { width, height })
+            .build();
+        let scissors = [scissor];
+        unsafe { self.device.cmd_set_scissor(self.buffer.handle, 0, &scissors) }
         self
     }
 }
