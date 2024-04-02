@@ -4,6 +4,7 @@ use crate::{window::Window, World};
 use bytemuck::offset_of;
 use glam::{Vec2, Vec3};
 use hephaestus::{
+    buffer::Buffer,
     command,
     pipeline::{
         self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass,
@@ -11,7 +12,8 @@ use hephaestus::{
     },
     task::{Fence, Semaphore, SubmitInfo, Task},
     vertex::{self, AttributeType},
-    ClearColorValue, ClearValue, Context, Extent2D, PipelineStageFlags, VkResult,
+    BufferUsageFlags, ClearColorValue, ClearValue, Context, Extent2D, MemoryPropertyFlags,
+    PipelineStageFlags, VkResult,
 };
 use log::info;
 
@@ -44,6 +46,7 @@ pub struct Renderer {
     semaphores: Vec<Semaphore>,
     frame_index: usize,
     tasks: VecDeque<Frame>,
+    vertex_buffer: Buffer,
 }
 
 impl Renderer {
@@ -100,6 +103,31 @@ impl Renderer {
             .map(|_| Semaphore::new(&ctx.device))
             .collect::<VkResult<Vec<Semaphore>>>()?;
 
+        let vertices = [
+            Vertex {
+                pos: Vec2::new(0.0, -0.5),
+                colour: Vec3::X,
+            },
+            Vertex {
+                pos: Vec2::new(0.5, 0.5),
+                colour: Vec3::Y,
+            },
+            Vertex {
+                pos: Vec2::new(-0.5, 0.5),
+                colour: Vec3::Z,
+            },
+        ];
+        let vertices_data = bytemuck::cast_slice::<Vertex, u8>(&vertices);
+
+        let vertex_buffer = Buffer::new(
+            &ctx.instance,
+            &ctx.device,
+            vertices_data.len(),
+            BufferUsageFlags::VERTEX_BUFFER,
+            MemoryPropertyFlags::HOST_COHERENT | MemoryPropertyFlags::HOST_VISIBLE,
+        )?;
+        vertex_buffer.write(&ctx.device, vertices_data)?;
+
         Ok(Self {
             ctx,
             render_pass,
@@ -108,6 +136,7 @@ impl Renderer {
             semaphores,
             frame_index: 0,
             tasks: VecDeque::new(),
+            vertex_buffer
         })
     }
 
@@ -120,6 +149,7 @@ impl Renderer {
         self.semaphores
             .into_iter()
             .for_each(|semaphore| semaphore.destroy(&self.ctx.device));
+        self.vertex_buffer.destroy(&self.ctx.device);
         self.framebuffers
             .into_iter()
             .for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
@@ -206,6 +236,7 @@ pub fn draw(world: &mut World) {
         .bind_graphics_pipeline(&renderer.pipeline)
         .set_viewport(size.width, size.height)
         .set_scissor(size.width, size.height)
+        .bind_vertex_buffer(&renderer.vertex_buffer, 0)
         .draw(3, 1, 0, 0)
         .end_render_pass()
         .end()

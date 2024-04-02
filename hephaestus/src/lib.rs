@@ -2,6 +2,7 @@ pub mod pipeline;
 pub mod command;
 pub mod task;
 pub mod vertex;
+pub mod buffer;
 
 use std::{
     collections::HashSet,
@@ -10,7 +11,7 @@ use std::{
 };
 
 pub use ash::prelude::VkResult;
-pub use ash::vk::{ClearValue, ClearColorValue, PipelineStageFlags, Extent2D};
+pub use ash::vk::{ClearValue, ClearColorValue, PipelineStageFlags, Extent2D, BufferUsageFlags, MemoryPropertyFlags};
 use ash::{
     vk::{
         self, ApplicationInfo, ColorSpaceKHR, ComponentMapping, CompositeAlphaFlagsKHR, DeviceCreateInfo,

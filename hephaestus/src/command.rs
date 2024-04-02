@@ -3,7 +3,7 @@ use ash::{
     vk::{self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPoolCreateInfo, Extent2D, Offset2D, PipelineBindPoint, Rect2D, RenderPassBeginInfo, SubpassContents, Viewport},
 };
 
-use crate::{pipeline::{Framebuffer, Graphics, RenderPass}, Device, Queue};
+use crate::{buffer, pipeline::{Framebuffer, Graphics, RenderPass}, Device, Queue};
 
 pub struct Buffer {
     pub handle: vk::CommandBuffer,
@@ -79,6 +79,11 @@ impl Recorder<'_> {
             .build();
         let scissors = [scissor];
         unsafe { self.device.cmd_set_scissor(self.buffer.handle, 0, &scissors) }
+        self
+    }
+
+    pub fn bind_vertex_buffer(self, buffer: &buffer::Buffer, binding: u32) -> Self {
+        unsafe { self.device.cmd_bind_vertex_buffers(self.buffer.handle, binding, &[buffer.handle], &[0]) }
         self
     }
 }
