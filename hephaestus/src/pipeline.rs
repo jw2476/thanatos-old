@@ -1,14 +1,25 @@
 use ash::{
     prelude::VkResult,
     vk::{
-        self, AttachmentDescription, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, ColorComponentFlags, CullModeFlags, DynamicState, Extent2D, Format, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineDepthStencilStateCreateInfo, PipelineDynamicStateCreateInfo, PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateInfo, PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPassCreateInfo, Result, SampleCountFlags, ShaderModuleCreateInfo, ShaderStageFlags, SubpassDescription
+        self, AttachmentDescription, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp,
+        ColorComponentFlags, CullModeFlags, DynamicState, Extent2D, Format, FramebufferCreateInfo,
+        FrontFace, GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
+        PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo,
+        PipelineDepthStencilStateCreateInfo, PipelineDynamicStateCreateInfo,
+        PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateInfo,
+        PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateInfo,
+        PipelineShaderStageCreateInfo, PipelineVertexInputStateCreateInfo,
+        PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D,
+        RenderPassCreateInfo, Result, SampleCountFlags, ShaderModuleCreateInfo, ShaderStageFlags,
+        SubpassDescription, VertexInputAttributeDescription, VertexInputBindingDescription,
+        VertexInputRate,
     },
 };
 use log::error;
 
 pub use ash::vk::{ImageLayout, PipelineBindPoint};
 
-use crate::{Device, ImageView};
+use crate::{vertex, Device, ImageView};
 
 pub struct ShaderModule {
     pub handle: vk::ShaderModule,
@@ -185,6 +196,7 @@ pub struct GraphicsBuilder<'a> {
     viewport: Option<Viewport>,
     render_pass: Option<&'a RenderPass>,
     subpass: Option<u32>,
+    vertex_info: Option<vertex::Info>,
 }
 
 impl<'a> GraphicsBuilder<'a> {
@@ -213,6 +225,11 @@ impl<'a> GraphicsBuilder<'a> {
         self
     }
 
+    pub fn vertex_info(mut self, info: vertex::Info) -> Self {
+        self.vertex_info = Some(info);
+        self
+    }
+
     pub fn build(self, device: &Device) -> VkResult<Graphics> {
         let vertex_stage = PipelineShaderStageCreateInfo::builder()
             .stage(ShaderStageFlags::VERTEX)
@@ -232,21 +249,42 @@ impl<'a> GraphicsBuilder<'a> {
             dynamic_states.push(DynamicState::VIEWPORT);
             dynamic_states.push(DynamicState::SCISSOR);
         }
-        let dynamic_state = PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
-        let vertex_input = PipelineVertexInputStateCreateInfo::default();
+        let dynamic_state =
+            PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
+
+        let vertex_info = self.vertex_info.expect("Missing vertex info");
+        let vertex_bindings = [VertexInputBindingDescription::builder()
+            .binding(0)
+            .stride(vertex_info.stride as u32)
+            .input_rate(VertexInputRate::VERTEX)
+            .build()];
+        let attributes = vertex_info
+            .attributes
+            .into_iter()
+            .enumerate()
+            .map(|(i, (ty, offset))| {
+                VertexInputAttributeDescription::builder()
+                    .binding(0)
+                    .location(i as u32)
+                    .format(ty.to_format())
+                    .offset(offset as u32)
+                    .build()
+            })
+            .collect::<Vec<_>>();
+
+        let vertex_input = PipelineVertexInputStateCreateInfo::builder()
+            .vertex_binding_descriptions(&vertex_bindings)
+            .vertex_attribute_descriptions(&attributes);
+
         let input_assembly = PipelineInputAssemblyStateCreateInfo::builder()
             .topology(PrimitiveTopology::TRIANGLE_LIST)
             .primitive_restart_enable(false);
-
 
         let (viewports, scissors) = match viewport {
             Viewport::Fixed(width, height) => {
                 let scissor = Rect2D::builder()
                     .offset(Offset2D::default())
-                    .extent(Extent2D {
-                        width,
-                        height,
-                    })
+                    .extent(Extent2D { width, height })
                     .build();
                 let viewport = vk::Viewport::builder()
                     .x(0.0)

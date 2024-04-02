@@ -42,7 +42,7 @@ impl VecAny {
         });
 
         unsafe {
-            std::slice::from_raw_parts_mut(vec.ptr.unwrap().cast(), vec.len).copy_from_slice(&data);
+            std::slice::from_raw_parts_mut(vec.ptr.unwrap().cast(), vec.len).copy_from_slice(data);
         }
 
         vec

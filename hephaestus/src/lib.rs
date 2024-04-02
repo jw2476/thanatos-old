@@ -1,6 +1,7 @@
 pub mod pipeline;
 pub mod command;
 pub mod task;
+pub mod vertex;
 
 use std::{
     collections::HashSet,
@@ -440,7 +441,7 @@ impl Device {
 }
 
 pub struct Context {
-    entry: Entry,
+    pub entry: Entry,
     pub instance: Instance,
     pub surface: Surface,
     pub device: Device,

@@ -1,12 +1,34 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, mem::size_of};
 
 use crate::{window::Window, World};
+use bytemuck::offset_of;
+use glam::{Vec2, Vec3};
 use hephaestus::{
-    command, pipeline::{
-        self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass, Viewport,
-    }, task::{Fence, Semaphore, SubmitInfo, Task}, ClearColorValue, ClearValue, Context, Extent2D, PipelineStageFlags, Swapchain, VkResult
+    command,
+    pipeline::{
+        self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass,
+        Viewport,
+    },
+    task::{Fence, Semaphore, SubmitInfo, Task},
+    vertex::{self, AttributeType},
+    ClearColorValue, ClearValue, Context, Extent2D, PipelineStageFlags, VkResult,
 };
 use log::info;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex {
+    pos: Vec2,
+    colour: Vec3,
+}
+
+impl Vertex {
+    pub fn info() -> vertex::Info {
+        vertex::Info::new(size_of::<Self>())
+            .attribute(AttributeType::Vec2, 0)
+            .attribute(AttributeType::Vec3, offset_of!(Vertex, colour))
+    }
+}
 
 pub struct Frame {
     task: Task,
@@ -57,6 +79,7 @@ impl Renderer {
 
         let pipeline = pipeline::Graphics::builder()
             .vertex(&vertex)
+            .vertex_info(Vertex::info())
             .fragment(&fragment)
             .render_pass(&render_pass)
             .subpass(0)
@@ -106,10 +129,16 @@ impl Renderer {
     }
 
     pub fn recreate_swapchain(&mut self, size: (u32, u32)) -> VkResult<()> {
-        self.ctx.surface.extent = Extent2D { width: size.0, height: size.1 };
+        self.ctx.surface.extent = Extent2D {
+            width: size.0,
+            height: size.1,
+        };
         self.ctx.recreate_swapchain().unwrap();
-        self.framebuffers.drain(..).for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
-        self.framebuffers = self.ctx
+        self.framebuffers
+            .drain(..)
+            .for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
+        self.framebuffers = self
+            .ctx
             .swapchain
             .views
             .iter()
@@ -140,7 +169,8 @@ pub fn draw(world: &mut World) {
             &renderer.ctx.device,
             &renderer.ctx.swapchain,
             image_available.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
     let window = world.get::<Window>().unwrap();
     let size = window.window.inner_size();
@@ -148,9 +178,11 @@ pub fn draw(world: &mut World) {
     if suboptimal {
         info!("Recreating swapchain...");
         unsafe { renderer.ctx.device.device_wait_idle().unwrap() };
-        renderer.recreate_swapchain((size.width, size.height)).unwrap();
+        renderer
+            .recreate_swapchain((size.width, size.height))
+            .unwrap();
         task.destroy(&renderer.ctx.device);
-        return
+        return;
     }
 
     let clear_value = ClearValue {

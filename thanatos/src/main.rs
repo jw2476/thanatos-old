@@ -66,7 +66,6 @@ async fn main() {
         .with_ticker(window::clear_mouse_delta)
         .with_ticker(window::poll_events)
         .with_handler(camera::handle_resize)
-        //.with_handler(graphics::resize_surface)
         .with_ticker(graphics::draw)
         .with_ticker(|world| {
             let mut camera = world.get_mut::<Camera>().unwrap();

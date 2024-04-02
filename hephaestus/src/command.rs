@@ -10,7 +10,7 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn begin<'a>(self, device: &'a Device) -> VkResult<Recorder<'a>> {
+    pub fn begin(self, device: &Device) -> VkResult<Recorder> {
         let begin_info = CommandBufferBeginInfo::default();
         unsafe { device.begin_command_buffer(self.handle, &begin_info)? };
         Ok(Recorder { buffer: self, device })

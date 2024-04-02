@@ -49,7 +49,7 @@ pub struct Accessor {
 impl Accessor {
     pub fn get_data(&self, glb: &Glb) -> Vec<u8> {
         let buffer_view = glb.gltf.buffer_views.get(self.buffer_view).unwrap();
-        let buffer = glb.gltf.buffers.get(buffer_view.buffer).unwrap();
+        let _buffer = glb.gltf.buffers.get(buffer_view.buffer).unwrap();
 
         let offset = self.byte_offset + buffer_view.byte_offset;
 
