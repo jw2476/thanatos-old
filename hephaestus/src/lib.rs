@@ -1,8 +1,9 @@
-pub mod pipeline;
+pub mod buffer;
 pub mod command;
+pub mod descriptor;
+pub mod pipeline;
 pub mod task;
 pub mod vertex;
-pub mod buffer;
 
 use std::{
     collections::HashSet,
@@ -11,15 +12,18 @@ use std::{
 };
 
 pub use ash::prelude::VkResult;
-pub use ash::vk::{ClearValue, ClearColorValue, PipelineStageFlags, Extent2D, BufferUsageFlags, MemoryPropertyFlags};
+pub use ash::vk::{
+    BufferUsageFlags, ClearColorValue, ClearValue, DescriptorType, Extent2D, MemoryPropertyFlags,
+    PipelineStageFlags,
+};
 use ash::{
     vk::{
-        self, ApplicationInfo, ColorSpaceKHR, ComponentMapping, CompositeAlphaFlagsKHR, DeviceCreateInfo,
-        DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
-        ImageUsageFlags, ImageViewCreateInfo, ImageViewType, InstanceCreateInfo,
-        PhysicalDeviceFeatures, PhysicalDeviceProperties, PresentModeKHR, QueueFamilyProperties,
-        QueueFlags, SharingMode, SurfaceCapabilitiesKHR,
-        SurfaceFormatKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+        self, ApplicationInfo, ColorSpaceKHR, ComponentMapping, CompositeAlphaFlagsKHR,
+        DeviceCreateInfo, DeviceQueueCreateInfo, Format, Image, ImageAspectFlags,
+        ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewType,
+        InstanceCreateInfo, PhysicalDeviceFeatures, PhysicalDeviceProperties, PresentModeKHR,
+        QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
+        SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Entry,
 };
@@ -73,7 +77,7 @@ impl Surface {
         instance: &Instance,
         physical: &PhysicalDevice,
         window: T,
-        extent: (u32, u32)
+        extent: (u32, u32),
     ) -> VkResult<Self> {
         unsafe {
             let handle = ash_window::create_surface(
@@ -102,7 +106,10 @@ impl Surface {
                 capabilities,
                 formats,
                 present_modes,
-                extent: Extent2D { width: extent.0, height: extent.1 }
+                extent: Extent2D {
+                    width: extent.0,
+                    height: extent.1,
+                },
             })
         }
     }
@@ -259,7 +266,7 @@ impl Swapchain {
             .formats
             .iter()
             .find(|format| {
-                format.format == Format::B8G8R8_SRGB
+                format.format == Format::B8G8R8A8_SRGB
                     && format.color_space == ColorSpaceKHR::SRGB_NONLINEAR
             })
             .unwrap_or_else(|| surface.formats.first().unwrap());
@@ -272,7 +279,16 @@ impl Swapchain {
             .unwrap_or(PresentModeKHR::FIFO);
 
         let extent = if surface.capabilities.current_extent.width == u32::MAX {
-            surface.extent
+            Extent2D {
+                width: surface.extent.width.clamp(
+                    surface.capabilities.min_image_extent.width,
+                    surface.capabilities.max_image_extent.width,
+                ),
+                height: surface.extent.height.clamp(
+                    surface.capabilities.min_image_extent.height,
+                    surface.capabilities.max_image_extent.height,
+                ),
+            }
         } else {
             surface.capabilities.current_extent
         };
@@ -454,7 +470,7 @@ impl Context {
     pub fn new<T: HasRawWindowHandle + HasRawDisplayHandle>(
         name: &str,
         window: T,
-        extent: (u32, u32)
+        extent: (u32, u32),
     ) -> VkResult<Self> {
         let entry = Entry::linked();
         let name = CString::new(name).unwrap();
@@ -476,7 +492,26 @@ impl Context {
     }
 
 
+    fn refresh_surface(&mut self) -> VkResult<()> {
+        unsafe {
+            self.surface.capabilities = self.instance
+                .extensions
+                .surface
+                .get_physical_device_surface_capabilities(self.device.physical.handle, self.surface.handle)?;
+            self.surface.formats = self.instance
+                .extensions
+                .surface
+                .get_physical_device_surface_formats(self.device.physical.handle, self.surface.handle)?;
+            self.surface.present_modes = self.instance
+                .extensions
+                .surface
+                .get_physical_device_surface_present_modes(self.device.physical.handle, self.surface.handle)?;
+            Ok(())
+        }
+    }
+
     pub fn recreate_swapchain(&mut self) -> VkResult<()> {
+        self.refresh_surface()?;
         self.swapchain.delete(&self.device);
         self.swapchain = Swapchain::new(&self.device, &self.surface)?;
         Ok(())

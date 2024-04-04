@@ -87,15 +87,18 @@ impl Task {
         swapchain: &Swapchain,
         signal: Semaphore,
     ) -> VkResult<(u32, bool)> {
-        let (image_index, suboptimal) = unsafe {
+        let result = unsafe {
             device.extensions.swapchain.acquire_next_image(
                 swapchain.handle,
                 u64::MAX,
                 signal.handle,
                 vk::Fence::null(),
-            )?
+            )
         };
-        Ok((image_index, suboptimal))
+        match result {
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Ok((0, true)),
+            x => x
+        }
     }
 
     pub fn submit(&mut self, info: SubmitInfo) -> VkResult<()> {
@@ -135,7 +138,7 @@ impl Task {
         swapchain: &Swapchain,
         image_index: u32,
         wait: &[Semaphore],
-    ) -> VkResult<()> {
+    ) -> VkResult<bool> {
         let wait_semaphores = wait.iter().map(|wait| wait.handle).collect::<Vec<_>>();
         let swapchains = [swapchain.handle];
         let image_indices = [image_index];
@@ -144,13 +147,17 @@ impl Task {
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 
-        unsafe {
+        let result = unsafe {
             device
                 .extensions
                 .swapchain
-                .queue_present(device.queues.present.handle, &present_info)?
+                .queue_present(device.queues.present.handle, &present_info)
         };
-        Ok(())
+        match result {
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Ok(true),
+            Err(vk::Result::SUBOPTIMAL_KHR) => Ok(true),
+            x => x
+        }
     }
 
     pub fn destroy(self, device: &Device) {

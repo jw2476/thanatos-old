@@ -1,18 +1,13 @@
 use std::{collections::VecDeque, mem::size_of};
 
-use crate::{window::Window, World};
+use crate::{camera::Camera, window::Window, World};
 use bytemuck::offset_of;
 use glam::{Vec2, Vec3};
 use hephaestus::{
-    buffer::Static,
-    command,
-    pipeline::{
+    buffer::Static, command, descriptor, pipeline::{
         self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass,
         Viewport,
-    },
-    task::{Fence, Semaphore, SubmitInfo, Task},
-    vertex::{self, AttributeType},
-    BufferUsageFlags, ClearColorValue, ClearValue, Context, Extent2D, PipelineStageFlags, VkResult,
+    }, task::{Fence, Semaphore, SubmitInfo, Task}, vertex::{self, AttributeType}, BufferUsageFlags, ClearColorValue, ClearValue, Context, DescriptorType, Extent2D, PipelineStageFlags, VkResult
 };
 use log::info;
 
@@ -35,6 +30,20 @@ pub struct Frame {
     task: Task,
     cmd: command::Buffer,
     fence: Fence,
+    camera_buffer: Static,
+    camera_set: descriptor::Set
+}
+
+impl Frame {
+    pub fn destroy(self, ctx: &Context) {
+        self.fence.wait(&ctx.device).unwrap();
+        self
+            .cmd
+            .destroy(&ctx.device, &ctx.command_pool);
+        self.camera_set.destroy(&ctx);
+        self.camera_buffer.destroy(&ctx.device);
+        self.task.destroy(&ctx.device);
+    }
 }
 
 pub struct Renderer {
@@ -46,7 +55,8 @@ pub struct Renderer {
     frame_index: usize,
     tasks: VecDeque<Frame>,
     vertex_buffer: Static,
-    index_buffer: Static
+    index_buffer: Static,
+    camera_layout: descriptor::Layout
 }
 
 impl Renderer {
@@ -80,6 +90,8 @@ impl Renderer {
             builder.build(&ctx.device)?
         };
 
+        let camera_layout = descriptor::Layout::new(&ctx, &[DescriptorType::UNIFORM_BUFFER], 1000)?;
+
         let pipeline = pipeline::Graphics::builder()
             .vertex(&vertex)
             .vertex_info(Vertex::info())
@@ -87,6 +99,7 @@ impl Renderer {
             .render_pass(&render_pass)
             .subpass(0)
             .viewport(Viewport::Dynamic)
+            .layouts(vec![&camera_layout])
             .build(&ctx.device)?;
 
         vertex.destroy(&ctx.device);
@@ -118,8 +131,8 @@ impl Renderer {
             },
             Vertex {
                 pos: Vec2::new(-0.5, 0.5),
-                colour: Vec3::ONE
-            }
+                colour: Vec3::ONE,
+            },
         ];
 
         let indices = [0, 1, 2, 2, 3, 0];
@@ -138,16 +151,14 @@ impl Renderer {
             frame_index: 0,
             tasks: VecDeque::new(),
             vertex_buffer,
-            index_buffer
+            index_buffer,
+            camera_layout
         })
     }
 
     pub fn destroy(self) {
         unsafe { self.ctx.device.device_wait_idle().unwrap() };
-        self.tasks.into_iter().for_each(|frame| {
-            frame.cmd.destroy(&self.ctx.device, &self.ctx.command_pool);
-            frame.task.destroy(&self.ctx.device);
-        });
+        self.tasks.into_iter().for_each(|frame| frame.destroy(&self.ctx));
         self.semaphores
             .into_iter()
             .for_each(|semaphore| semaphore.destroy(&self.ctx.device));
@@ -157,11 +168,13 @@ impl Renderer {
             .into_iter()
             .for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
         self.pipeline.destroy(&self.ctx.device);
+        self.camera_layout.destroy(&self.ctx);
         self.render_pass.destroy(&self.ctx.device);
         self.ctx.destroy();
     }
 
     pub fn recreate_swapchain(&mut self, size: (u32, u32)) -> VkResult<()> {
+        unsafe { self.ctx.device.device_wait_idle()? }
         self.ctx.surface.extent = Extent2D {
             width: size.0,
             height: size.1,
@@ -185,11 +198,7 @@ pub fn draw(world: &mut World) {
     let mut renderer = world.get_mut::<Renderer>().unwrap();
     if renderer.tasks.len() > Renderer::FRAMES_IN_FLIGHT {
         let frame = renderer.tasks.pop_front().unwrap();
-        frame.fence.wait(&renderer.ctx.device).unwrap();
-        frame
-            .cmd
-            .destroy(&renderer.ctx.device, &renderer.ctx.command_pool);
-        frame.task.destroy(&renderer.ctx.device);
+        frame.destroy(&renderer.ctx);
     }
 
     let mut task = Task::new();
@@ -209,8 +218,7 @@ pub fn draw(world: &mut World) {
     let size = window.window.inner_size();
 
     if suboptimal {
-        info!("Recreating swapchain...");
-        unsafe { renderer.ctx.device.device_wait_idle().unwrap() };
+        info!("Recreating swapchain");
         renderer
             .recreate_swapchain((size.width, size.height))
             .unwrap();
@@ -223,6 +231,16 @@ pub fn draw(world: &mut World) {
             float32: [0.0, 0.0, 0.0, 1.0],
         },
     };
+
+    let camera = world.get::<Camera>().unwrap();
+    let camera_buffer = Static::new(
+        &renderer.ctx,
+        bytemuck::cast_slice::<f32, u8>(&camera.get_matrix().to_cols_array()),
+        BufferUsageFlags::UNIFORM_BUFFER,
+    )
+    .unwrap();
+    let camera_set = renderer.camera_layout.alloc(&renderer.ctx).unwrap();
+    camera_set.write_buffer(&renderer.ctx, 0, &camera_buffer);
 
     let cmd = renderer
         .ctx
@@ -241,6 +259,7 @@ pub fn draw(world: &mut World) {
         .set_scissor(size.width, size.height)
         .bind_vertex_buffer(&renderer.vertex_buffer, 0)
         .bind_index_buffer(&renderer.index_buffer)
+        .bind_descriptor_set(&camera_set, 0)
         .draw_indexed(6, 1, 0, 0, 0)
         .end_render_pass()
         .end()
@@ -256,7 +275,7 @@ pub fn draw(world: &mut World) {
     })
     .unwrap();
 
-    task.present(
+    let suboptimal = task.present(
         &renderer.ctx.device,
         &renderer.ctx.swapchain,
         image_index,
@@ -264,10 +283,20 @@ pub fn draw(world: &mut World) {
     )
     .unwrap();
 
+
+    if suboptimal {
+        info!("Recreating swapchain");
+        renderer
+            .recreate_swapchain((size.width, size.height))
+            .unwrap();
+    }
+
     renderer.tasks.push_back(Frame {
         task,
         cmd,
         fence: in_flight,
+        camera_buffer,
+        camera_set
     });
 
     renderer.frame_index += 1;

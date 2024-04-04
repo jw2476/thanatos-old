@@ -18,11 +18,13 @@ use crate::{
 pub trait Buffer {
     fn buffer(&self) -> vk::Buffer;
     fn memory(&self) -> vk::DeviceMemory;
+    fn size(&self) -> usize;
 }
 
 pub struct Dynamic {
     pub handle: vk::Buffer,
     pub memory: vk::DeviceMemory,
+    pub size: usize
 }
 
 impl Dynamic {
@@ -59,7 +61,7 @@ impl Dynamic {
         let memory = unsafe { ctx.device.allocate_memory(&alloc_info, None)? };
         unsafe { ctx.device.bind_buffer_memory(handle, memory, 0)? };
 
-        Ok(Self { handle, memory })
+        Ok(Self { handle, memory, size })
     }
 
     pub fn write(&self, device: &Device, data: &[u8]) -> VkResult<()> {
@@ -87,11 +89,16 @@ impl Buffer for Dynamic {
     fn memory(&self) -> vk::DeviceMemory {
         self.memory
     }
+
+    fn size(&self) -> usize {
+        self.size
+    }
 }
 
 pub struct Static {
     pub handle: vk::Buffer,
     pub memory: vk::DeviceMemory,
+    pub size: usize
 }
 
 impl Static {
@@ -134,7 +141,7 @@ impl Static {
         )?;
         staging.write(&ctx.device, data)?;
 
-        let buffer = Self { handle, memory };
+        let buffer = Self { handle, memory, size };
 
         let cmd = ctx
             .command_pool
@@ -182,5 +189,9 @@ impl Buffer for Static {
 
     fn memory(&self) -> vk::DeviceMemory {
         self.memory
+    }
+
+    fn size(&self) -> usize {
+        self.size
     }
 }

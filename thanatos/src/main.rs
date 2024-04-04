@@ -114,7 +114,7 @@ async fn main() {
         })
         .with_ticker(|world| {
             let clock = world.get::<Clock>().unwrap();
-            println!("FPS: {}", 1.0 / clock.frame_delta.as_secs_f32());
+            //println!("FPS: {}", 1.0 / clock.frame_delta.as_secs_f32());
         })
         .with_ticker(Clock::tick)
         .with_handler(|world, event| match event {

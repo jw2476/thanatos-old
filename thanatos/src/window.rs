@@ -58,7 +58,7 @@ impl Window {
     pub fn new() -> Self {
         let event_loop = EventLoop::new().unwrap();
         event_loop.set_control_flow(ControlFlow::Poll);
-        let window = WindowBuilder::new().build(&event_loop).unwrap();
+        let window = WindowBuilder::new().with_fullscreen(Some(winit::window::Fullscreen::Borderless(None))).build(&event_loop).unwrap();
         let window = Arc::new(window);
         Self { event_loop, window }
     }

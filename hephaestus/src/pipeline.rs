@@ -19,7 +19,7 @@ use log::error;
 
 pub use ash::vk::{ImageLayout, PipelineBindPoint};
 
-use crate::{vertex, Device, ImageView};
+use crate::{descriptor, vertex, Device, ImageView};
 
 pub struct ShaderModule {
     pub handle: vk::ShaderModule,
@@ -197,6 +197,7 @@ pub struct GraphicsBuilder<'a> {
     render_pass: Option<&'a RenderPass>,
     subpass: Option<u32>,
     vertex_info: Option<vertex::Info>,
+    layouts: Vec<&'a descriptor::Layout>,
 }
 
 impl<'a> GraphicsBuilder<'a> {
@@ -227,6 +228,11 @@ impl<'a> GraphicsBuilder<'a> {
 
     pub fn vertex_info(mut self, info: vertex::Info) -> Self {
         self.vertex_info = Some(info);
+        self
+    }
+
+    pub fn layouts(mut self, layouts: Vec<&'a descriptor::Layout>) -> Self {
+        self.layouts = layouts;
         self
     }
 
@@ -327,7 +333,9 @@ impl<'a> GraphicsBuilder<'a> {
             .logic_op_enable(false)
             .attachments(&attachments);
 
-        let create_info = PipelineLayoutCreateInfo::default();
+        let set_layouts = self.layouts.iter().map(|x| x.layout).collect::<Vec<_>>();
+        let create_info = PipelineLayoutCreateInfo::builder()
+            .set_layouts(&set_layouts);
         let layout = unsafe { device.create_pipeline_layout(&create_info, None)? };
 
         let create_info = GraphicsPipelineCreateInfo::builder()
