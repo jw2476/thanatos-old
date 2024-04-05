@@ -5,7 +5,7 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, BufferCreateInfo, BufferUsageFlags, MemoryAllocateInfo, MemoryMapFlags,
-        MemoryPropertyFlags, SharingMode,
+        MemoryPropertyFlags, MemoryRequirements, SharingMode,
     },
 };
 
@@ -21,18 +21,33 @@ pub trait Buffer {
     fn size(&self) -> usize;
 }
 
+pub(crate) fn find_memory_type(
+    ctx: &Context,
+    requirements: MemoryRequirements,
+    wanted: MemoryPropertyFlags,
+) -> Option<usize> {
+    let properties = unsafe {
+        ctx.instance
+            .get_physical_device_memory_properties(ctx.device.physical.handle)
+    };
+
+    properties
+        .memory_types
+        .iter()
+        .enumerate()
+        .position(|(i, ty)| {
+            (requirements.memory_type_bits & (1 << i)) != 0 && ty.property_flags.contains(wanted)
+        })
+}
+
 pub struct Dynamic {
     pub handle: vk::Buffer,
     pub memory: vk::DeviceMemory,
-    pub size: usize
+    pub size: usize,
 }
 
 impl Dynamic {
-    pub fn new(
-        ctx: &Context,
-        size: usize,
-        usage: BufferUsageFlags,
-    ) -> VkResult<Self> {
+    pub fn new(ctx: &Context, size: usize, usage: BufferUsageFlags) -> VkResult<Self> {
         let create_info = BufferCreateInfo::builder()
             .size(size as u64)
             .usage(usage)
@@ -40,20 +55,13 @@ impl Dynamic {
         let handle = unsafe { ctx.device.create_buffer(&create_info, None)? };
 
         let requirements = unsafe { ctx.device.get_buffer_memory_requirements(handle) };
-        let properties =
-            unsafe { ctx.instance.get_physical_device_memory_properties(ctx.device.physical.handle) };
 
-        let type_index = properties
-            .memory_types
-            .iter()
-            .enumerate()
-            .position(|(i, ty)| {
-                (requirements.memory_type_bits & (1 << i)) != 0
-                    && ty.property_flags.contains(
-                        MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
-                    )
-            })
-            .expect("No memory type found that satisfies requirements");
+        let type_index = find_memory_type(
+            ctx,
+            requirements,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        )
+        .expect("No suitable memory types");
 
         let alloc_info = MemoryAllocateInfo::builder()
             .allocation_size(requirements.size)
@@ -61,7 +69,11 @@ impl Dynamic {
         let memory = unsafe { ctx.device.allocate_memory(&alloc_info, None)? };
         unsafe { ctx.device.bind_buffer_memory(handle, memory, 0)? };
 
-        Ok(Self { handle, memory, size })
+        Ok(Self {
+            handle,
+            memory,
+            size,
+        })
     }
 
     pub fn write(&self, device: &Device, data: &[u8]) -> VkResult<()> {
@@ -98,7 +110,7 @@ impl Buffer for Dynamic {
 pub struct Static {
     pub handle: vk::Buffer,
     pub memory: vk::DeviceMemory,
-    pub size: usize
+    pub size: usize,
 }
 
 impl Static {
@@ -111,22 +123,8 @@ impl Static {
         let handle = unsafe { ctx.device.create_buffer(&create_info, None)? };
 
         let requirements = unsafe { ctx.device.get_buffer_memory_requirements(handle) };
-        let properties = unsafe {
-            ctx.instance
-                .get_physical_device_memory_properties(ctx.device.physical.handle)
-        };
-
-        let type_index = properties
-            .memory_types
-            .iter()
-            .enumerate()
-            .position(|(i, ty)| {
-                (requirements.memory_type_bits & (1 << i)) != 0
-                    && ty
-                        .property_flags
-                        .contains(MemoryPropertyFlags::DEVICE_LOCAL)
-            })
-            .expect("No memory type found that satisfies requirements");
+        let type_index = find_memory_type(ctx, requirements, MemoryPropertyFlags::DEVICE_LOCAL)
+            .expect("No suitable memory types");
 
         let alloc_info = MemoryAllocateInfo::builder()
             .allocation_size(requirements.size)
@@ -134,14 +132,14 @@ impl Static {
         let memory = unsafe { ctx.device.allocate_memory(&alloc_info, None)? };
         unsafe { ctx.device.bind_buffer_memory(handle, memory, 0)? };
 
-        let staging = Dynamic::new(
-            ctx,
-            size,
-            BufferUsageFlags::TRANSFER_SRC,
-        )?;
+        let staging = Dynamic::new(ctx, size, BufferUsageFlags::TRANSFER_SRC)?;
         staging.write(&ctx.device, data)?;
 
-        let buffer = Self { handle, memory, size };
+        let buffer = Self {
+            handle,
+            memory,
+            size,
+        };
 
         let cmd = ctx
             .command_pool

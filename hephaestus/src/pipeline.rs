@@ -12,7 +12,7 @@ use ash::{
         PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D,
         RenderPassCreateInfo, Result, SampleCountFlags, ShaderModuleCreateInfo, ShaderStageFlags,
         SubpassDescription, VertexInputAttributeDescription, VertexInputBindingDescription,
-        VertexInputRate,
+        VertexInputRate, ClearValue, ClearColorValue, ClearDepthStencilValue, CompareOp
     },
 };
 use log::error;
@@ -20,6 +20,23 @@ use log::error;
 pub use ash::vk::{ImageLayout, PipelineBindPoint};
 
 use crate::{descriptor, vertex, Device, ImageView};
+
+pub fn clear_colour(colour: [f32; 4]) -> ClearValue {
+    ClearValue {
+        color: ClearColorValue {
+            float32: colour,
+        },
+    }
+}
+
+pub fn clear_depth(depth: f32) -> ClearValue {
+    ClearValue {
+        depth_stencil: ClearDepthStencilValue {
+            depth,
+            stencil: 0
+        }
+    }
+}
 
 pub struct ShaderModule {
     pub handle: vk::ShaderModule,
@@ -95,6 +112,7 @@ impl RenderPass {
 pub struct Subpass {
     bind_point: PipelineBindPoint,
     colour: Vec<AttachmentReference>,
+    depth: Option<AttachmentReference>,
 }
 
 impl Subpass {
@@ -102,11 +120,20 @@ impl Subpass {
         Self {
             bind_point,
             colour: Vec::new(),
+            depth: None,
         }
     }
 
     pub fn colour(mut self, attachment: AttachmentId, layout: ImageLayout) -> Self {
         self.colour.push(AttachmentReference {
+            attachment: attachment.0,
+            layout,
+        });
+        self
+    }
+
+    pub fn depth(mut self, attachment: AttachmentId, layout: ImageLayout) -> Self {
+        self.depth = Some(AttachmentReference {
             attachment: attachment.0,
             layout,
         });
@@ -153,10 +180,14 @@ impl RenderPassBuilder {
             .subpasses
             .iter()
             .map(|subpass| {
-                SubpassDescription::builder()
+                let desc = SubpassDescription::builder()
                     .pipeline_bind_point(subpass.bind_point)
-                    .color_attachments(&subpass.colour)
-                    .build()
+                    .color_attachments(&subpass.colour);
+                if let Some(depth) = subpass.depth.as_ref() {
+                    desc.depth_stencil_attachment(depth).build()
+                } else {
+                    desc.build()
+                }
             })
             .collect::<Vec<_>>();
         let create_info = RenderPassCreateInfo::builder()
@@ -198,6 +229,7 @@ pub struct GraphicsBuilder<'a> {
     subpass: Option<u32>,
     vertex_info: Option<vertex::Info>,
     layouts: Vec<&'a descriptor::Layout>,
+    depth: bool
 }
 
 impl<'a> GraphicsBuilder<'a> {
@@ -233,6 +265,11 @@ impl<'a> GraphicsBuilder<'a> {
 
     pub fn layouts(mut self, layouts: Vec<&'a descriptor::Layout>) -> Self {
         self.layouts = layouts;
+        self
+    }
+
+    pub fn depth(mut self) -> Self {
+        self.depth = true;
         self
     }
 
@@ -321,7 +358,16 @@ impl<'a> GraphicsBuilder<'a> {
             .sample_shading_enable(false)
             .rasterization_samples(SampleCountFlags::TYPE_1);
 
-        let depth_stencil = PipelineDepthStencilStateCreateInfo::default();
+        let depth_stencil = if self.depth {
+            PipelineDepthStencilStateCreateInfo::builder()
+            .depth_test_enable(true)
+                .depth_write_enable(true)
+                .depth_compare_op(CompareOp::LESS)
+                .depth_bounds_test_enable(false)
+                .stencil_test_enable(false).build()
+        } else {
+            PipelineDepthStencilStateCreateInfo::default()
+        };
 
         let attachment = PipelineColorBlendAttachmentState::builder()
             .color_write_mask(ColorComponentFlags::RGBA)
@@ -334,8 +380,7 @@ impl<'a> GraphicsBuilder<'a> {
             .attachments(&attachments);
 
         let set_layouts = self.layouts.iter().map(|x| x.layout).collect::<Vec<_>>();
-        let create_info = PipelineLayoutCreateInfo::builder()
-            .set_layouts(&set_layouts);
+        let create_info = PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
         let layout = unsafe { device.create_pipeline_layout(&create_info, None)? };
 
         let create_info = GraphicsPipelineCreateInfo::builder()

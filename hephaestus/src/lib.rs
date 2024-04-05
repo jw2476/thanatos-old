@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod command;
 pub mod descriptor;
+pub mod image;
 pub mod pipeline;
 pub mod task;
 pub mod vertex;
@@ -13,21 +14,20 @@ use std::{
 
 pub use ash::prelude::VkResult;
 pub use ash::vk::{
-    BufferUsageFlags, ClearColorValue, ClearValue, DescriptorType, Extent2D, MemoryPropertyFlags,
-    PipelineStageFlags,
+    BufferUsageFlags, ClearColorValue, ClearValue, DescriptorType, Extent2D, Format,
+    ImageAspectFlags, ImageUsageFlags, MemoryPropertyFlags, PipelineStageFlags,
 };
 use ash::{
     vk::{
-        self, ApplicationInfo, ColorSpaceKHR, ComponentMapping, CompositeAlphaFlagsKHR,
-        DeviceCreateInfo, DeviceQueueCreateInfo, Format, Image, ImageAspectFlags,
-        ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewType,
-        InstanceCreateInfo, PhysicalDeviceFeatures, PhysicalDeviceProperties, PresentModeKHR,
-        QueueFamilyProperties, QueueFlags, SharingMode, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
-        SwapchainCreateInfoKHR, SwapchainKHR,
+        self, ApplicationInfo, ColorSpaceKHR, CompositeAlphaFlagsKHR, DeviceCreateInfo,
+        DeviceQueueCreateInfo, Image, InstanceCreateInfo, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PresentModeKHR, QueueFamilyProperties, QueueFlags, SharingMode,
+        SurfaceCapabilitiesKHR, SurfaceFormatKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Entry,
 };
 
+use image::ImageView;
 use log::{error, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
@@ -241,17 +241,6 @@ impl Deref for Device {
     }
 }
 
-pub struct ImageView {
-    pub handle: vk::ImageView,
-    pub extent: Extent2D,
-}
-
-impl ImageView {
-    pub fn destroy(self, device: &Device) {
-        unsafe { device.destroy_image_view(self.handle, None) };
-    }
-}
-
 pub struct Swapchain {
     pub handle: SwapchainKHR,
     pub images: Vec<Image>,
@@ -329,30 +318,18 @@ impl Swapchain {
         };
 
         let images = unsafe { device.extensions.swapchain.get_swapchain_images(handle)? };
-        let handles = images
+        let views = images
             .iter()
             .map(|image| {
-                let create_info = ImageViewCreateInfo::builder()
-                    .image(*image)
-                    .view_type(ImageViewType::TYPE_2D)
-                    .format(format.format)
-                    .components(ComponentMapping::default())
-                    .subresource_range(
-                        ImageSubresourceRange::builder()
-                            .aspect_mask(ImageAspectFlags::COLOR)
-                            .base_mip_level(0)
-                            .level_count(1)
-                            .base_array_layer(0)
-                            .layer_count(1)
-                            .build(),
-                    );
-                unsafe { device.create_image_view(&create_info, None) }
+                ImageView::new(
+                    &device,
+                    *image,
+                    format.format,
+                    ImageAspectFlags::COLOR,
+                    extent,
+                )
             })
             .collect::<VkResult<Vec<_>>>()?;
-        let views = handles
-            .into_iter()
-            .map(|handle| ImageView { handle, extent })
-            .collect();
 
         Ok(Swapchain {
             handle,
@@ -491,21 +468,32 @@ impl Context {
         })
     }
 
-
     fn refresh_surface(&mut self) -> VkResult<()> {
         unsafe {
-            self.surface.capabilities = self.instance
+            self.surface.capabilities = self
+                .instance
                 .extensions
                 .surface
-                .get_physical_device_surface_capabilities(self.device.physical.handle, self.surface.handle)?;
-            self.surface.formats = self.instance
+                .get_physical_device_surface_capabilities(
+                    self.device.physical.handle,
+                    self.surface.handle,
+                )?;
+            self.surface.formats = self
+                .instance
                 .extensions
                 .surface
-                .get_physical_device_surface_formats(self.device.physical.handle, self.surface.handle)?;
-            self.surface.present_modes = self.instance
+                .get_physical_device_surface_formats(
+                    self.device.physical.handle,
+                    self.surface.handle,
+                )?;
+            self.surface.present_modes = self
+                .instance
                 .extensions
                 .surface
-                .get_physical_device_surface_present_modes(self.device.physical.handle, self.surface.handle)?;
+                .get_physical_device_surface_present_modes(
+                    self.device.physical.handle,
+                    self.surface.handle,
+                )?;
             Ok(())
         }
     }

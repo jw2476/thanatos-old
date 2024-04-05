@@ -4,24 +4,31 @@ use crate::{camera::Camera, window::Window, World};
 use bytemuck::offset_of;
 use glam::{Vec2, Vec3};
 use hephaestus::{
-    buffer::Static, command, descriptor, pipeline::{
+    buffer::Static,
+    command, descriptor,
+    image::{Image, ImageView},
+    pipeline::{
         self, Framebuffer, ImageLayout, PipelineBindPoint, RenderPass, ShaderModule, Subpass,
-        Viewport,
-    }, task::{Fence, Semaphore, SubmitInfo, Task}, vertex::{self, AttributeType}, BufferUsageFlags, ClearColorValue, ClearValue, Context, DescriptorType, Extent2D, PipelineStageFlags, VkResult
+        Viewport, clear_colour, clear_depth,
+    },
+    task::{Fence, Semaphore, SubmitInfo, Task},
+    vertex::{self, AttributeType},
+    BufferUsageFlags, ClearColorValue, ClearValue, Context, DescriptorType, Extent2D, Format,
+    ImageAspectFlags, ImageUsageFlags, PipelineStageFlags, VkResult,
 };
 use log::info;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
-    pos: Vec2,
+    pos: Vec3,
     colour: Vec3,
 }
 
 impl Vertex {
     pub fn info() -> vertex::Info {
         vertex::Info::new(size_of::<Self>())
-            .attribute(AttributeType::Vec2, 0)
+            .attribute(AttributeType::Vec3, 0)
             .attribute(AttributeType::Vec3, offset_of!(Vertex, colour))
     }
 }
@@ -31,15 +38,13 @@ pub struct Frame {
     cmd: command::Buffer,
     fence: Fence,
     camera_buffer: Static,
-    camera_set: descriptor::Set
+    camera_set: descriptor::Set,
 }
 
 impl Frame {
     pub fn destroy(self, ctx: &Context) {
         self.fence.wait(&ctx.device).unwrap();
-        self
-            .cmd
-            .destroy(&ctx.device, &ctx.command_pool);
+        self.cmd.destroy(&ctx.device, &ctx.command_pool);
         self.camera_set.destroy(&ctx);
         self.camera_buffer.destroy(&ctx.device);
         self.task.destroy(&ctx.device);
@@ -56,7 +61,9 @@ pub struct Renderer {
     tasks: VecDeque<Frame>,
     vertex_buffer: Static,
     index_buffer: Static,
-    camera_layout: descriptor::Layout
+    camera_layout: descriptor::Layout,
+    depth_images: Vec<Image>,
+    depth_views: Vec<ImageView>
 }
 
 impl Renderer {
@@ -78,14 +85,20 @@ impl Renderer {
 
         let render_pass = {
             let mut builder = RenderPass::builder();
-            let attachment = builder.attachment(
+            let colour = builder.attachment(
                 ctx.swapchain.format,
                 ImageLayout::UNDEFINED,
                 ImageLayout::PRESENT_SRC_KHR,
             );
+            let depth = builder.attachment(
+                Format::D32_SFLOAT,
+                ImageLayout::UNDEFINED,
+                ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            );
             builder.subpass(
                 Subpass::new(PipelineBindPoint::GRAPHICS)
-                    .colour(attachment, ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+                    .colour(colour, ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                    .depth(depth, ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
             );
             builder.build(&ctx.device)?
         };
@@ -100,16 +113,20 @@ impl Renderer {
             .subpass(0)
             .viewport(Viewport::Dynamic)
             .layouts(vec![&camera_layout])
+            .depth()
             .build(&ctx.device)?;
 
         vertex.destroy(&ctx.device);
         fragment.destroy(&ctx.device);
 
+        let (depth_images, depth_views) = Self::create_depth_images(&ctx)?;
+
         let framebuffers = ctx
             .swapchain
             .views
             .iter()
-            .map(|view| render_pass.get_framebuffer(&ctx.device, &[view]))
+            .zip(&depth_views)
+            .map(|(colour, depth)| render_pass.get_framebuffer(&ctx.device, &[colour, depth]))
             .collect::<VkResult<Vec<Framebuffer>>>()?;
 
         let semaphores = (0..Self::FRAMES_IN_FLIGHT)
@@ -118,24 +135,40 @@ impl Renderer {
 
         let vertices = [
             Vertex {
-                pos: Vec2::new(-0.5, -0.5),
+                pos: Vec3::new(-0.5, -0.5, 0.0),
                 colour: Vec3::X,
             },
             Vertex {
-                pos: Vec2::new(0.5, -0.5),
+                pos: Vec3::new(0.5, -0.5, 0.0),
                 colour: Vec3::Y,
             },
             Vertex {
-                pos: Vec2::new(0.5, 0.5),
+                pos: Vec3::new(0.5, 0.5, 0.0),
                 colour: Vec3::Z,
             },
             Vertex {
-                pos: Vec2::new(-0.5, 0.5),
+                pos: Vec3::new(-0.5, 0.5, 0.0),
+                colour: Vec3::ONE,
+            },
+            Vertex {
+                pos: Vec3::new(-0.5, -0.5, -0.5),
+                colour: Vec3::X,
+            },
+            Vertex {
+                pos: Vec3::new(0.5, -0.5, -0.5),
+                colour: Vec3::Y,
+            },
+            Vertex {
+                pos: Vec3::new(0.5, 0.5, -0.5),
+                colour: Vec3::Z,
+            },
+            Vertex {
+                pos: Vec3::new(-0.5, 0.5, -0.5),
                 colour: Vec3::ONE,
             },
         ];
 
-        let indices = [0, 1, 2, 2, 3, 0];
+        let indices = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
         let vertices_data = bytemuck::cast_slice::<Vertex, u8>(&vertices);
         let indices_data = bytemuck::cast_slice::<u32, u8>(&indices);
@@ -152,21 +185,61 @@ impl Renderer {
             tasks: VecDeque::new(),
             vertex_buffer,
             index_buffer,
-            camera_layout
+            camera_layout,
+            depth_images,
+            depth_views
         })
+    }
+    
+    fn create_depth_images(ctx: &Context) -> VkResult<(Vec<Image>, Vec<ImageView>)> {
+        let depth_images = ctx
+            .swapchain
+            .views
+            .iter()
+            .map(|_| {
+                Image::new(
+                    &ctx,
+                    Format::D32_SFLOAT,
+                    ctx.swapchain.extent,
+                    ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                )
+            })
+            .collect::<VkResult<Vec<_>>>()?;
+
+        let depth_views = depth_images
+            .iter()
+            .map(|image| {
+                ImageView::new(
+                    &ctx.device,
+                    image.handle,
+                    Format::D32_SFLOAT,
+                    ImageAspectFlags::DEPTH,
+                    ctx.swapchain.extent
+                )
+            })
+            .collect::<VkResult<Vec<_>>>()?;
+
+        Ok((depth_images, depth_views))
+
     }
 
     pub fn destroy(self) {
         unsafe { self.ctx.device.device_wait_idle().unwrap() };
-        self.tasks.into_iter().for_each(|frame| frame.destroy(&self.ctx));
+        self.tasks
+            .into_iter()
+            .for_each(|frame| frame.destroy(&self.ctx));
         self.semaphores
             .into_iter()
             .for_each(|semaphore| semaphore.destroy(&self.ctx.device));
         self.vertex_buffer.destroy(&self.ctx.device);
         self.index_buffer.destroy(&self.ctx.device);
+
         self.framebuffers
             .into_iter()
             .for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
+        self.depth_views.into_iter().for_each(|view| view.destroy(&self.ctx.device));
+        self.depth_images.into_iter().for_each(|image| image.destroy(&self.ctx));
+        
         self.pipeline.destroy(&self.ctx.device);
         self.camera_layout.destroy(&self.ctx);
         self.render_pass.destroy(&self.ctx.device);
@@ -180,16 +253,26 @@ impl Renderer {
             height: size.1,
         };
         self.ctx.recreate_swapchain().unwrap();
+
         self.framebuffers
             .drain(..)
             .for_each(|framebuffer| framebuffer.destroy(&self.ctx.device));
+        self.depth_views.drain(..).for_each(|view| view.destroy(&self.ctx.device));
+        self.depth_images.drain(..).for_each(|image| image.destroy(&self.ctx));
+
+        let (depth_images, depth_views) = Self::create_depth_images(&self.ctx)?;
+        self.depth_images = depth_images;
+        self.depth_views = depth_views;
+
         self.framebuffers = self
             .ctx
             .swapchain
             .views
             .iter()
-            .map(|view| self.render_pass.get_framebuffer(&self.ctx.device, &[view]))
+            .zip(&self.depth_views)
+            .map(|(colour, depth)| self.render_pass.get_framebuffer(&self.ctx.device, &[colour, depth]))
             .collect::<VkResult<Vec<Framebuffer>>>()?;
+
         Ok(())
     }
 }
@@ -226,12 +309,6 @@ pub fn draw(world: &mut World) {
         return;
     }
 
-    let clear_value = ClearValue {
-        color: ClearColorValue {
-            float32: [0.0, 0.0, 0.0, 1.0],
-        },
-    };
-
     let camera = world.get::<Camera>().unwrap();
     let camera_buffer = Static::new(
         &renderer.ctx,
@@ -241,6 +318,9 @@ pub fn draw(world: &mut World) {
     .unwrap();
     let camera_set = renderer.camera_layout.alloc(&renderer.ctx).unwrap();
     camera_set.write_buffer(&renderer.ctx, 0, &camera_buffer);
+
+
+    let clear_values = [clear_colour([0.0, 0.0, 0.0, 1.0]), clear_depth(1.0)];
 
     let cmd = renderer
         .ctx
@@ -252,7 +332,7 @@ pub fn draw(world: &mut World) {
         .begin_render_pass(
             &renderer.render_pass,
             renderer.framebuffers.get(image_index as usize).unwrap(),
-            &[clear_value],
+            &clear_values,
         )
         .bind_graphics_pipeline(&renderer.pipeline)
         .set_viewport(size.width, size.height)
@@ -260,7 +340,7 @@ pub fn draw(world: &mut World) {
         .bind_vertex_buffer(&renderer.vertex_buffer, 0)
         .bind_index_buffer(&renderer.index_buffer)
         .bind_descriptor_set(&camera_set, 0)
-        .draw_indexed(6, 1, 0, 0, 0)
+        .draw_indexed(12, 1, 0, 0, 0)
         .end_render_pass()
         .end()
         .unwrap();
@@ -275,14 +355,14 @@ pub fn draw(world: &mut World) {
     })
     .unwrap();
 
-    let suboptimal = task.present(
-        &renderer.ctx.device,
-        &renderer.ctx.swapchain,
-        image_index,
-        &[render_finished],
-    )
-    .unwrap();
-
+    let suboptimal = task
+        .present(
+            &renderer.ctx.device,
+            &renderer.ctx.swapchain,
+            image_index,
+            &[render_finished],
+        )
+        .unwrap();
 
     if suboptimal {
         info!("Recreating swapchain");
@@ -296,7 +376,7 @@ pub fn draw(world: &mut World) {
         cmd,
         fence: in_flight,
         camera_buffer,
-        camera_set
+        camera_set,
     });
 
     renderer.frame_index += 1;
