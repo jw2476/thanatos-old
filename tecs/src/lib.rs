@@ -2,7 +2,7 @@ mod vecany;
 pub use vecany::VecAny;
 
 use std::{
-    any::{Any, TypeId},
+    any::{type_name, Any, TypeId},
     cell::{Ref, RefCell, RefMut},
     collections::HashMap,
     marker::PhantomData,
@@ -180,7 +180,16 @@ impl<E> World<E> {
         let columns = T::get_columns();
         let ids = columns
             .iter()
-            .map(|column| self.components.get(column).unwrap().borrow().len() as u32)
+            .map(|column| {
+                self.components
+                    .get(column)
+                    .expect(&format!(
+                        "Trying to spawn an unregistered archetype: {}",
+                        type_name::<T>()
+                    ))
+                    .borrow()
+                    .len() as u32
+            })
             .collect::<Vec<u32>>();
         let store = self
             .archetypes

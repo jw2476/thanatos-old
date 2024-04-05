@@ -2,16 +2,18 @@ use std::path::Path;
 
 use glam::{Vec3, Vec4};
 use gltf::Glb;
+use hephaestus::{buffer::Static, Context, BufferUsageFlags};
 
-/*
+use crate::graphics::{Vertex, Renderer};
+
 pub struct Mesh {
-    pub vertex_buffer: Buffer,
-    pub index_buffer: Buffer,
+    pub vertex_buffer: Static,
+    pub index_buffer: Static,
     pub num_indices: u32,
 }
 
 impl Mesh {
-    pub fn load<T: AsRef<Path>>(path: T, device: &wgpu::Device) -> Self {
+    pub fn load<T: AsRef<Path>>(path: T, renderer: &Renderer) -> Self {
         let model = Glb::load(&std::fs::read(path).unwrap()).unwrap();
 
         let positions: Vec<Vec3> = bytemuck::cast_slice::<u8, f32>(
@@ -42,17 +44,8 @@ impl Mesh {
             .get_indices_data(&model)
             .unwrap();
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertex_buffer = Static::new(&renderer.ctx, bytemuck::cast_slice::<Vertex, u8>(&vertices), BufferUsageFlags::VERTEX_BUFFER).unwrap();
+        let index_buffer = Static::new(&renderer.ctx, bytemuck::cast_slice::<u32, u8>(&indices), BufferUsageFlags::INDEX_BUFFER).unwrap();
 
         Mesh {
             vertex_buffer,
@@ -62,6 +55,7 @@ impl Mesh {
     }
 }
 
+/*
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MaterialData {
@@ -69,7 +63,7 @@ pub struct MaterialData {
 }
 
 pub struct Material {
-    pub buffer: Buffer,
+    pub buffer: Static,
     pub bind_group: BindGroup,
 }
 
@@ -96,16 +90,17 @@ impl Material {
         Self { buffer, bind_group }
     }
 }
+#[derive(Clone, Copy, Debug)]
+pub struct MaterialId(usize);
+*/
 
 #[derive(Clone, Copy, Debug)]
 pub struct MeshId(usize);
-#[derive(Clone, Copy, Debug)]
-pub struct MaterialId(usize);
 
 #[derive(Default)]
 pub struct Manager {
     meshes: Vec<Mesh>,
-    materials: Vec<Material>,
+    //materials: Vec<Material>,
 }
 
 impl Manager {
@@ -122,6 +117,7 @@ impl Manager {
         self.meshes.get(id.0)
     }
 
+    /*
     pub fn add_material(&mut self, material: Material) -> MaterialId {
         self.materials.push(material);
         MaterialId(self.materials.len() - 1)
@@ -130,5 +126,5 @@ impl Manager {
     pub fn get_material(&self, id: MaterialId) -> Option<&Material> {
         self.materials.get(id.0)
     }
+    */
 }
-*/
