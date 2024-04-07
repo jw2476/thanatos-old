@@ -7,6 +7,7 @@ mod window;
 use std::time::{Duration, Instant};
 
 use crate::{camera::Camera, window::Window};
+use anyhow::Result;
 use assets::Mesh;
 use event::Event;
 use glam::{Quat, Vec3};
@@ -50,17 +51,17 @@ pub enum State {
 pub type World = tecs::World<Event>;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     pretty_env_logger::init();
 
     let window = Window::new();
 
-    let renderer = Renderer::new(&window).unwrap();
+    let renderer = Renderer::new(&window)?;
     let camera = Camera::new(&window);
 
     let mut assets = assets::Manager::new();
-    let copper_ore = assets.add_mesh(Mesh::load("assets/meshes/copper_ore.glb", &renderer));
-    let tree = assets.add_mesh(Mesh::load("assets/meshes/tree.glb", &renderer));
+    let copper_ore = assets.add_mesh(Mesh::load("assets/meshes/copper_ore.glb", &renderer)?);
+    let tree = assets.add_mesh(Mesh::load("assets/meshes/tree.glb", &renderer)?);
     let mut world = World::new()
         .with_resource(State::Running)
         .with_resource(window)
@@ -88,9 +89,7 @@ async fn main() {
                 *world.get_mut::<State>().unwrap() = State::Stopped;
             }
             _ => (),
-        })
-        .register::<CopperOre>()
-        .register::<Tree>();
+        });
 
     world.spawn(CopperOre {
         render: RenderObject { mesh: copper_ore },
@@ -103,6 +102,8 @@ async fn main() {
         world.tick();
     }
 
-    let renderer = world.take::<Renderer>().unwrap();
+    let renderer = world.remove::<Renderer>().unwrap();
     renderer.destroy();
+
+    Ok(())
 }

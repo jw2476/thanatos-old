@@ -69,6 +69,7 @@ pub struct Renderer {
     frame_index: usize,
     tasks: VecDeque<Frame>,
     camera_layout: descriptor::Layout,
+    object_layout: descriptor::Layout,
     depth_images: Vec<Image>,
     depth_views: Vec<ImageView>,
 }
@@ -111,6 +112,7 @@ impl Renderer {
         };
 
         let camera_layout = descriptor::Layout::new(&ctx, &[DescriptorType::UNIFORM_BUFFER], 1000)?;
+        let object_layout = descriptor::Layout::new(&ctx, &[DescriptorType::UNIFORM_BUFFER; 2], 1000)?;
 
         let pipeline = pipeline::Graphics::builder()
             .vertex(&vertex)
@@ -119,7 +121,7 @@ impl Renderer {
             .render_pass(&render_pass)
             .subpass(0)
             .viewport(Viewport::Dynamic)
-            .layouts(vec![&camera_layout])
+            .layouts(vec![&camera_layout, &object_layout])
             .depth()
             .build(&ctx.device)?;
 
@@ -149,6 +151,7 @@ impl Renderer {
             frame_index: 0,
             tasks: VecDeque::new(),
             camera_layout,
+            object_layout,
             depth_images,
             depth_views,
         })
@@ -205,6 +208,7 @@ impl Renderer {
             .for_each(|image| image.destroy(&self.ctx));
 
         self.pipeline.destroy(&self.ctx.device);
+        self.object_layout.destroy(&self.ctx);
         self.camera_layout.destroy(&self.ctx);
         self.render_pass.destroy(&self.ctx.device);
         self.ctx.destroy();
@@ -292,7 +296,7 @@ pub fn draw(world: &mut World) {
 
     let clear_values = [clear_colour([0.0, 0.0, 0.0, 1.0]), clear_depth(1.0)];
 
-    let objects = world.get_components::<RenderObject>();
+    let objects = world.query::<&RenderObject>();
     let assets = world.get::<assets::Manager>().unwrap();
 
     let cmd = renderer

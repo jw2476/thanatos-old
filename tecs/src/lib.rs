@@ -1,12 +1,10 @@
+#![feature(impl_trait_in_assoc_type)]
+
 mod vecany;
 pub use vecany::VecAny;
 
 use std::{
-    any::{type_name, Any, TypeId},
-    cell::{Ref, RefCell, RefMut},
-    collections::HashMap,
-    marker::PhantomData,
-    rc::Rc,
+    any::{type_name, Any, TypeId}, cell::{Cell, Ref, RefCell, RefMut, UnsafeCell}, collections::HashMap, iter::Empty, marker::PhantomData, ops::{Deref, DerefMut, Index}, ptr::NonNull, rc::Rc
 };
 
 pub trait System<E> {
@@ -32,37 +30,29 @@ impl<E, T: Fn(&mut World<E>)> System<E> for Ticker<T> {
 }
 
 pub trait Archetype: Any {
-    type Ref<'a>;
-    type Mut<'a>;
-
-    fn get_columns() -> Vec<TypeId>;
-    fn add_components(self, components: &mut HashMap<TypeId, RefCell<VecAny>>);
-    fn from_components<'a>(
-        components: &'a HashMap<TypeId, RefCell<VecAny>>,
-        indices: &[u32],
-    ) -> Self::Ref<'a>;
-    fn from_components_mut<'a>(
-        components: &'a HashMap<TypeId, RefCell<VecAny>>,
-        indices: &[u32],
-    ) -> Self::Mut<'a>;
+    fn columns() -> Vec<TypeId>;
+    fn add(self, table: &mut Table);
 }
 
 #[macro_export]
 macro_rules! impl_archetype {
     (struct $for:ident { $( $field:ident: $type:ty ),* $(,)?}) => {
+        /*
         concat_idents::concat_idents!(for_ref = $for, Ref {
             pub struct for_ref<'a> {
-                $($field: std::cell::Ref<'a, $type>,)*
+                $($field: &'a $type,)*
             }
         });
 
         concat_idents::concat_idents!(for_mut = $for, Mut {
             pub struct for_mut<'a> {
-                $($field: std::cell::RefMut<'a, $type>,)*
+                $($field: &'a mut $type,)*
             }
         });
+*/
 
         impl tecs::Archetype for $for {
+            /*
             concat_idents::concat_idents!(for_ref = $for, Ref {
                 type Ref<'a> = for_ref<'a>;
 
@@ -85,14 +75,17 @@ macro_rules! impl_archetype {
                     }
                 }
             });
+            */
 
-            fn get_columns() -> Vec<std::any::TypeId> {
+            fn columns() -> Vec<std::any::TypeId> {
                 vec![$(std::any::TypeId::of::<$type>()),*]
             }
 
-            fn add_components(self, components: &mut std::collections::HashMap<std::any::TypeId, std::cell::RefCell<tecs::VecAny>>) {
+            fn add(self, table: &mut tecs::Table) {
+                table.length += 1;
+                let mut columns = table.columns_mut();
                 $(
-                    components.get_mut(&std::any::TypeId::of::<$type>()).unwrap().borrow_mut().push(self.$field);
+                    columns.next().unwrap().push::<$type>(self.$field);
                 )*
             }
 
@@ -101,25 +94,126 @@ macro_rules! impl_archetype {
     };
 }
 
-struct ArchetypeTable {
-    columns: Vec<TypeId>,
-    rows: Vec<Vec<u32>>,
+pub struct RowIndex(u32);
+pub struct Column {
+    data: VecAny,
 }
 
-impl ArchetypeTable {
-    pub fn new(columns: Vec<TypeId>) -> Self {
+impl Column {
+    pub fn new(ty: TypeId) -> Self {
+        let data = VecAny::new_uninit(ty);
+        Self { data }
+    }
+
+    pub fn get<T: 'static>(&self, index: RowIndex) -> Option<&T> {
+        self.data.downcast_ref()?.get(index.0 as usize)
+    }
+
+    pub fn get_mut<T: 'static>(&mut self, index: RowIndex) -> Option<&mut T> {
+        self.data.downcast_mut()?.get_mut(index.0 as usize)
+    }
+
+    pub fn push<T: 'static>(&mut self, item: T) {
+        self.data.push(item)
+    }
+}
+
+pub struct Table {
+    pub length: usize,
+    columns: Vec<(TypeId, RefCell<Column>)>,
+}
+
+impl Table {
+    pub fn new(columns: &[TypeId]) -> Self {
         Self {
-            columns,
-            rows: Vec::new(),
+            length: 0,
+            columns: columns.iter().cloned().map(|ty| (ty, RefCell::new(Column::new(ty)))).collect(),
         }
+    }
+
+    pub fn columns_mut(&self) -> impl Iterator<Item=RefMut<'_, Column>> {
+        self.columns.iter().map(|(_, column)| column.borrow_mut())
+    }
+
+    pub fn column<T: 'static>(&self) -> Option<Ref<'_, [T]>> {
+        self.columns
+            .iter()
+            .find(|(ty, _)| *ty == TypeId::of::<T>())
+            .and_then(|(_, column)| Ref::filter_map(column.borrow(), |column| column.data.downcast_ref::<T>()).ok())
+    }
+
+    pub fn column_mut<T: 'static>(&self) -> Option<RefMut<'_, [T]>> {
+        self.columns
+            .iter()
+            .find(|(ty, _)| *ty == TypeId::of::<T>())
+            .and_then(|(_, column)| RefMut::filter_map(column.borrow_mut(), |column| column.data.downcast_mut::<T>()).ok())
+    }
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
+}
+
+pub struct Columns<'a, T> {
+    columns: Vec<Ref<'a, [T]>>
+}
+
+impl<'a, T> Columns<'a, T> {
+    pub fn iter(&self) -> impl Iterator<Item=&T> {
+        self.columns.iter().flat_map(|column| column.deref())
+    } 
+}
+
+pub struct ColumnsMut<'a, T> {
+    columns: Vec<RefMut<'a, [T]>>
+}
+
+impl<'a, T> ColumnsMut<'a, T> {
+    pub fn iter(&self) -> impl Iterator<Item=&T> {
+        self.columns.iter().flat_map(|column| column.deref())
+    } 
+
+    pub fn iter_mut(&'a mut self) -> impl Iterator<Item=&mut T> {
+        self.columns.iter_mut().flat_map(|column| (*column).deref_mut().iter_mut())
+    } 
+}
+
+pub trait Query<E> {
+    type Output<'a>;
+
+    fn query(tables: &HashMap<TypeId, Table>) -> Self::Output<'_>;
+}
+
+impl<T: 'static, E> Query<E> for &'_ T {
+    type Output<'a> = Columns<'a, T>;
+
+    fn query(tables: &HashMap<TypeId, Table>) -> Self::Output<'_> {
+        let columns = tables.values().filter_map(|table| table.column::<T>()).collect();
+        Columns { columns }
+    }
+}
+
+impl<T: 'static, E> Query<E> for &'_ mut T {
+    type Output<'a> = ColumnsMut<'a, T>;
+
+    fn query(tables: &HashMap<TypeId, Table>) -> Self::Output<'_> {
+        let columns = tables.values().filter_map(|table| table.column_mut::<T>()).collect();
+        ColumnsMut { columns }
+    }
+}
+
+impl<E, A: Query<E>, B: Query<E>> Query<E> for (A, B) {
+    type Output<'a> = (A::Output<'a>, B::Output<'a>);
+
+    fn query(tables: &HashMap<TypeId, Table>) -> Self::Output<'_> {
+        (A::query(tables), B::query(tables))
     }
 }
 
 pub struct EntityId<T>(u32, PhantomData<T>);
 
 pub struct World<E> {
-    archetypes: HashMap<TypeId, ArchetypeTable>,
-    components: HashMap<TypeId, RefCell<VecAny>>,
+    archetypes: HashMap<TypeId, Table>,
     systems: Vec<Rc<dyn System<E>>>,
     resources: HashMap<TypeId, Rc<RefCell<dyn Any>>>,
 }
@@ -128,7 +222,6 @@ impl<E> Default for World<E> {
     fn default() -> Self {
         Self {
             archetypes: HashMap::new(),
-            components: HashMap::new(),
             systems: Vec::new(),
             resources: HashMap::new(),
         }
@@ -161,73 +254,40 @@ impl<E> World<E> {
         self
     }
 
-    pub fn register<T: Archetype>(mut self) -> Self {
-        let columns = T::get_columns();
-        self.archetypes
-            .insert(TypeId::of::<T>(), ArchetypeTable::new(columns.clone()));
-
-        columns.into_iter().for_each(|column| {
-            if self.components.get(&column).is_none() {
-                self.components
-                    .insert(column, RefCell::new(VecAny::new_uninit(column)));
-            }
-        });
-
-        self
+    fn register<T: Archetype>(&mut self) {
+        self.archetypes.insert(
+            TypeId::of::<T>(),
+            Table::new(&T::columns()),
+        );
     }
 
     pub fn spawn<T: Archetype>(&mut self, entity: T) -> EntityId<T> {
-        let columns = T::get_columns();
-        let ids = columns
-            .iter()
-            .map(|column| {
-                self.components
-                    .get(column)
-                    .expect(&format!(
-                        "Trying to spawn an unregistered archetype: {}",
-                        type_name::<T>()
-                    ))
-                    .borrow()
-                    .len() as u32
-            })
-            .collect::<Vec<u32>>();
+        if !self.archetypes.contains_key(&TypeId::of::<T>()) {
+            self.register::<T>();
+        }
+
         let store = self
             .archetypes
             .get_mut(&TypeId::of::<T>())
-            .expect("Using unregistered archetype");
-        store.rows.push(ids);
-        entity.add_components(&mut self.components);
-        EntityId(store.rows.len() as u32 - 1, PhantomData)
+            .unwrap();
+        entity.add(store);
+        EntityId(store.len() as u32 - 1, PhantomData)
     }
 
-    pub fn get_components<T: Any>(&self) -> Ref<'_, [T]> {
-        Ref::map(
-            self.components.get(&TypeId::of::<T>()).unwrap().borrow(),
-            |x| x.downcast_ref().unwrap(),
-        )
+    pub fn query<Q: Query<E>>(&self) -> Q::Output<'_> {
+        Q::query(&self.archetypes)
     }
 
-    pub fn get_components_mut<T: Any>(&self) -> RefMut<'_, [T]> {
-        RefMut::map(
-            self.components
-                .get(&TypeId::of::<T>())
-                .unwrap()
-                .borrow_mut(),
-            |x| x.downcast_mut().unwrap(),
-        )
+    /*
+    pub fn get_entities<T: Archetype>(&self) -> impl Iterator<Item = &T> {
+        let Some(table) = self.archetypes.get(&TypeId::of::<T>()) else {
+            return &[];
+        };
+
+        (0..table.borrow().len()).map(|index| T::from_components(components, indices))
     }
 
-    pub fn get_entities<T: Archetype>(&self) -> Vec<T::Ref<'_>> {
-        self.archetypes
-            .get(&TypeId::of::<T>())
-            .unwrap()
-            .rows
-            .iter()
-            .map(|indices| T::from_components(&self.components, indices))
-            .collect()
-    }
-
-    pub fn get_entities_mut<'a, T: Archetype>(&'a self) -> Vec<T::Mut<'a>> {
+    pub fn get_entities_mut<T: Archetype>(&self) -> Vec<T::Mut<'_>> {
         let rows = &self.archetypes.get(&TypeId::of::<T>()).unwrap().rows;
 
         let mut output = Vec::new();
@@ -237,6 +297,7 @@ impl<E> World<E> {
 
         output
     }
+    */
 
     pub fn get<T: Any>(&self) -> Option<Ref<'_, T>> {
         self.resources
@@ -250,7 +311,7 @@ impl<E> World<E> {
             .map(|resource| RefMut::map(resource.borrow_mut(), |x| x.downcast_mut().unwrap()))
     }
 
-    pub fn take<T: Any>(&mut self) -> Option<T> {
+    pub fn remove<T: Any>(&mut self) -> Option<T> {
         self.resources.remove(&TypeId::of::<T>()).and_then(|rc| {
             let ptr: *const RefCell<dyn Any> = Rc::into_raw(rc);
             let ptr: *const RefCell<T> = ptr.cast();

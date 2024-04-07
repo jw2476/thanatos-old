@@ -4,7 +4,7 @@ pub struct VecAny {
     ptr: Option<*mut u8>,
     len: usize,
     cap: usize,
-    id: TypeId,
+    ty: TypeId,
 }
 
 impl VecAny {
@@ -13,16 +13,16 @@ impl VecAny {
             ptr: unsafe { Some(std::alloc::alloc(Layout::new::<T>())) },
             len: 0,
             cap: 0,
-            id: TypeId::of::<T>(),
+            ty: TypeId::of::<T>(),
         }
     }
 
-    pub fn new_uninit(id: TypeId) -> Self {
+    pub fn new_uninit(ty: TypeId) -> Self {
         Self {
             ptr: None,
             len: 0,
             cap: 0,
-            id,
+            ty,
         }
     }
 
@@ -31,7 +31,7 @@ impl VecAny {
             ptr: unsafe { Some(std::alloc::alloc(Layout::new::<T>())) },
             len: data.len(),
             cap: data.len(),
-            id: TypeId::of::<T>(),
+            ty: TypeId::of::<T>(),
         };
         vec.ptr = Some(unsafe {
             std::alloc::realloc(
@@ -49,14 +49,14 @@ impl VecAny {
     }
 
     pub fn downcast_ref<T: 'static>(&self) -> Option<&[T]> {
-        if self.id != TypeId::of::<T>() {
+        if self.ty != TypeId::of::<T>() {
             return None;
         }
         Some(unsafe { std::slice::from_raw_parts(self.ptr?.cast(), self.len) })
     }
 
     pub fn downcast_mut<T: 'static>(&mut self) -> Option<&mut [T]> {
-        if self.id != TypeId::of::<T>() {
+        if self.ty != TypeId::of::<T>() {
             return None;
         }
 
@@ -68,7 +68,7 @@ impl VecAny {
             self.ptr = Some(unsafe { std::alloc::alloc(Layout::new::<T>()) })
         }
 
-        if self.id != TypeId::of::<T>() {
+        if self.ty != TypeId::of::<T>() {
             return;
         }
 
@@ -92,5 +92,9 @@ impl VecAny {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn ty(&self) -> TypeId {
+        self.ty
     }
 }

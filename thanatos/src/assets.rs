@@ -1,8 +1,9 @@
 use std::path::Path;
 
+use anyhow::Result;
 use glam::{Vec3, Vec4};
 use gltf::Glb;
-use hephaestus::{buffer::Static, Context, BufferUsageFlags};
+use hephaestus::{buffer::Static, Context, BufferUsageFlags, VkResult};
 
 use crate::graphics::{Vertex, Renderer};
 
@@ -13,7 +14,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn load<T: AsRef<Path>>(path: T, renderer: &Renderer) -> Self {
+    pub fn load<T: AsRef<Path>>(path: T, renderer: &Renderer) -> Result<Self> {
         let model = Glb::load(&std::fs::read(path).unwrap()).unwrap();
 
         let positions: Vec<Vec3> = bytemuck::cast_slice::<u8, f32>(
@@ -44,18 +45,17 @@ impl Mesh {
             .get_indices_data(&model)
             .unwrap();
 
-        let vertex_buffer = Static::new(&renderer.ctx, bytemuck::cast_slice::<Vertex, u8>(&vertices), BufferUsageFlags::VERTEX_BUFFER).unwrap();
-        let index_buffer = Static::new(&renderer.ctx, bytemuck::cast_slice::<u32, u8>(&indices), BufferUsageFlags::INDEX_BUFFER).unwrap();
+        let vertex_buffer = Static::new(&renderer.ctx, bytemuck::cast_slice::<Vertex, u8>(&vertices), BufferUsageFlags::VERTEX_BUFFER)?;
+        let index_buffer = Static::new(&renderer.ctx, bytemuck::cast_slice::<u32, u8>(&indices), BufferUsageFlags::INDEX_BUFFER)?;
 
-        Mesh {
+        Ok(Mesh {
             vertex_buffer,
             index_buffer,
             num_indices: indices.len() as u32,
-        }
+        })
     }
 }
 
-/*
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MaterialData {
@@ -64,43 +64,28 @@ pub struct MaterialData {
 
 pub struct Material {
     pub buffer: Static,
-    pub bind_group: BindGroup,
 }
 
 impl Material {
     pub fn load(
         material: MaterialData,
-        device: &wgpu::Device,
-        layout: &wgpu::BindGroupLayout,
-    ) -> Self {
+        renderer: &Renderer,
+    ) -> Result<Self> {
         let contents = bytemuck::bytes_of(&material);
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents,
-            usage: BufferUsages::UNIFORM,
-            label: None,
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-            label: None,
-        });
-        Self { buffer, bind_group }
+        let buffer = Static::new(&renderer.ctx, &contents, BufferUsageFlags::UNIFORM_BUFFER)?;
+        Ok(Self { buffer })
     }
 }
-#[derive(Clone, Copy, Debug)]
-pub struct MaterialId(usize);
-*/
 
 #[derive(Clone, Copy, Debug)]
 pub struct MeshId(usize);
+#[derive(Clone, Copy, Debug)]
+pub struct MaterialId(usize);
 
 #[derive(Default)]
 pub struct Manager {
     meshes: Vec<Mesh>,
-    //materials: Vec<Material>,
+    materials: Vec<Material>,
 }
 
 impl Manager {
@@ -117,7 +102,6 @@ impl Manager {
         self.meshes.get(id.0)
     }
 
-    /*
     pub fn add_material(&mut self, material: Material) -> MaterialId {
         self.materials.push(material);
         MaterialId(self.materials.len() - 1)
@@ -126,5 +110,4 @@ impl Manager {
     pub fn get_material(&self, id: MaterialId) -> Option<&Material> {
         self.materials.get(id.0)
     }
-    */
 }
