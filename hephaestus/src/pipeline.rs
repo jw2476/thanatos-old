@@ -2,8 +2,9 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, AttachmentDescription, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp,
-        ColorComponentFlags, CullModeFlags, DynamicState, Extent2D, Format, FramebufferCreateInfo,
-        FrontFace, GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
+        ClearColorValue, ClearDepthStencilValue, ClearValue, ColorComponentFlags, CompareOp,
+        CullModeFlags, DynamicState, Extent2D, Format, FramebufferCreateInfo, FrontFace,
+        GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
         PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo,
         PipelineDepthStencilStateCreateInfo, PipelineDynamicStateCreateInfo,
         PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateInfo,
@@ -12,7 +13,7 @@ use ash::{
         PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D,
         RenderPassCreateInfo, Result, SampleCountFlags, ShaderModuleCreateInfo, ShaderStageFlags,
         SubpassDescription, VertexInputAttributeDescription, VertexInputBindingDescription,
-        VertexInputRate, ClearValue, ClearColorValue, ClearDepthStencilValue, CompareOp
+        VertexInputRate,
     },
 };
 use log::error;
@@ -23,18 +24,13 @@ use crate::{descriptor, vertex, Device, ImageView};
 
 pub fn clear_colour(colour: [f32; 4]) -> ClearValue {
     ClearValue {
-        color: ClearColorValue {
-            float32: colour,
-        },
+        color: ClearColorValue { float32: colour },
     }
 }
 
 pub fn clear_depth(depth: f32) -> ClearValue {
     ClearValue {
-        depth_stencil: ClearDepthStencilValue {
-            depth,
-            stencil: 0
-        }
+        depth_stencil: ClearDepthStencilValue { depth, stencil: 0 },
     }
 }
 
@@ -229,7 +225,7 @@ pub struct GraphicsBuilder<'a> {
     subpass: Option<u32>,
     vertex_info: Option<vertex::Info>,
     layouts: Vec<&'a descriptor::Layout>,
-    depth: bool
+    depth: bool,
 }
 
 impl<'a> GraphicsBuilder<'a> {
@@ -360,11 +356,12 @@ impl<'a> GraphicsBuilder<'a> {
 
         let depth_stencil = if self.depth {
             PipelineDepthStencilStateCreateInfo::builder()
-            .depth_test_enable(true)
+                .depth_test_enable(true)
                 .depth_write_enable(true)
                 .depth_compare_op(CompareOp::LESS)
                 .depth_bounds_test_enable(false)
-                .stencil_test_enable(false).build()
+                .stencil_test_enable(false)
+                .build()
         } else {
             PipelineDepthStencilStateCreateInfo::default()
         };

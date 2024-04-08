@@ -125,11 +125,7 @@ impl Surface {
 }
 
 impl Instance {
-    #[cfg(target_os = "linux")]
-    const EXTENSIONS: &'static [&'static CStr] = &[
-        ash::extensions::khr::Surface::name(),
-        ash::extensions::khr::XcbSurface::name(),
-    ];
+    const EXTENSIONS: &'static [&'static CStr] = &[ash::extensions::khr::Surface::name()];
 
     const LAYERS: &'static [&'static CStr] = &[c"VK_LAYER_KHRONOS_validation"];
 

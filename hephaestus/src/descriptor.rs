@@ -1,9 +1,9 @@
 use ash::{
     prelude::VkResult,
     vk::{
-        self, DescriptorBufferInfo, DescriptorPoolCreateInfo, DescriptorPoolSize,
-        DescriptorSetAllocateInfo, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo,
-        DescriptorType, ShaderStageFlags, WriteDescriptorSet, DescriptorPoolCreateFlags
+        self, DescriptorBufferInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
+        DescriptorPoolSize, DescriptorSetAllocateInfo, DescriptorSetLayoutBinding,
+        DescriptorSetLayoutCreateInfo, DescriptorType, ShaderStageFlags, WriteDescriptorSet,
     },
 };
 

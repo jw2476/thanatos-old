@@ -4,7 +4,14 @@ mod vecany;
 pub use vecany::VecAny;
 
 use std::{
-    any::{type_name, Any, TypeId}, cell::{Cell, Ref, RefCell, RefMut, UnsafeCell}, collections::HashMap, iter::Empty, marker::PhantomData, ops::{Deref, DerefMut, Index}, ptr::NonNull, rc::Rc
+    any::{type_name, Any, TypeId},
+    cell::{Cell, Ref, RefCell, RefMut, UnsafeCell},
+    collections::HashMap,
+    iter::Empty,
+    marker::PhantomData,
+    ops::{Deref, DerefMut, Index},
+    ptr::NonNull,
+    rc::Rc,
 };
 
 pub trait System<E> {
@@ -127,26 +134,44 @@ impl Table {
     pub fn new(columns: &[TypeId]) -> Self {
         Self {
             length: 0,
-            columns: columns.iter().cloned().map(|ty| (ty, RefCell::new(Column::new(ty)))).collect(),
+            columns: columns
+                .iter()
+                .cloned()
+                .map(|ty| (ty, RefCell::new(Column::new(ty))))
+                .collect(),
         }
     }
 
-    pub fn columns_mut(&self) -> impl Iterator<Item=RefMut<'_, Column>> {
+    pub fn columns_mut(&self) -> impl Iterator<Item = RefMut<'_, Column>> {
         self.columns.iter().map(|(_, column)| column.borrow_mut())
+    }
+
+    pub fn has_column<T: 'static>(&self) -> bool {
+        self.columns
+            .iter()
+            .find(|(ty, _)| *ty == TypeId::of::<T>())
+            .is_some()
     }
 
     pub fn column<T: 'static>(&self) -> Option<Ref<'_, [T]>> {
         self.columns
             .iter()
             .find(|(ty, _)| *ty == TypeId::of::<T>())
-            .and_then(|(_, column)| Ref::filter_map(column.borrow(), |column| column.data.downcast_ref::<T>()).ok())
+            .and_then(|(_, column)| {
+                Ref::filter_map(column.borrow(), |column| column.data.downcast_ref::<T>()).ok()
+            })
     }
 
     pub fn column_mut<T: 'static>(&self) -> Option<RefMut<'_, [T]>> {
         self.columns
             .iter()
             .find(|(ty, _)| *ty == TypeId::of::<T>())
-            .and_then(|(_, column)| RefMut::filter_map(column.borrow_mut(), |column| column.data.downcast_mut::<T>()).ok())
+            .and_then(|(_, column)| {
+                RefMut::filter_map(column.borrow_mut(), |column| {
+                    column.data.downcast_mut::<T>()
+                })
+                .ok()
+            })
     }
 
     pub fn len(&self) -> usize {
@@ -155,62 +180,153 @@ impl Table {
 }
 
 pub struct Columns<'a, T> {
-    columns: Vec<Ref<'a, [T]>>
+    columns: Vec<Ref<'a, [T]>>,
+}
+
+impl<'a, T> FromIterator<Ref<'a, [T]>> for Columns<'a, T> {
+    fn from_iter<I: IntoIterator<Item = Ref<'a, [T]>>>(iter: I) -> Self {
+        Self {
+            columns: iter.into_iter().collect(),
+        }
+    }
 }
 
 impl<'a, T> Columns<'a, T> {
-    pub fn iter(&self) -> impl Iterator<Item=&T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.columns.iter().flat_map(|column| column.deref())
-    } 
+    }
 }
 
 pub struct ColumnsMut<'a, T> {
-    columns: Vec<RefMut<'a, [T]>>
+    columns: Vec<RefMut<'a, [T]>>,
+}
+
+impl<'a, T> FromIterator<RefMut<'a, [T]>> for ColumnsMut<'a, T> {
+    fn from_iter<I: IntoIterator<Item = RefMut<'a, [T]>>>(iter: I) -> Self {
+        Self {
+            columns: iter.into_iter().collect(),
+        }
+    }
 }
 
 impl<'a, T> ColumnsMut<'a, T> {
-    pub fn iter(&self) -> impl Iterator<Item=&T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.columns.iter().flat_map(|column| column.deref())
-    } 
+    }
 
-    pub fn iter_mut(&'a mut self) -> impl Iterator<Item=&mut T> {
-        self.columns.iter_mut().flat_map(|column| (*column).deref_mut().iter_mut())
-    } 
+    pub fn iter_mut(&'a mut self) -> impl Iterator<Item = &mut T> {
+        self.columns
+            .iter_mut()
+            .flat_map(|column| (*column).deref_mut().iter_mut())
+    }
 }
 
 pub trait Query<E> {
     type Output<'a>;
 
-    fn query(tables: &HashMap<TypeId, Table>) -> Self::Output<'_>;
+    fn filter(table: &(&TypeId, &Table)) -> bool;
+    fn data<'a>(tables: &[&'a Table]) -> Self::Output<'a>;
 }
 
 impl<T: 'static, E> Query<E> for &'_ T {
     type Output<'a> = Columns<'a, T>;
 
-    fn query(tables: &HashMap<TypeId, Table>) -> Self::Output<'_> {
-        let columns = tables.values().filter_map(|table| table.column::<T>()).collect();
-        Columns { columns }
+    fn filter(table: &(&TypeId, &Table)) -> bool {
+        table.1.has_column::<T>()
+    }
+
+    fn data<'a>(tables: &[&'a Table]) -> Self::Output<'a> {
+        tables.iter().map(|table| table.column().unwrap()).collect()
     }
 }
 
 impl<T: 'static, E> Query<E> for &'_ mut T {
     type Output<'a> = ColumnsMut<'a, T>;
 
-    fn query(tables: &HashMap<TypeId, Table>) -> Self::Output<'_> {
-        let columns = tables.values().filter_map(|table| table.column_mut::<T>()).collect();
-        ColumnsMut { columns }
+    fn filter(table: &(&TypeId, &Table)) -> bool {
+        table.1.has_column::<T>()
+    }
+
+    fn data<'a>(tables: &[&'a Table]) -> Self::Output<'a> {
+        tables
+            .iter()
+            .map(|table| table.column_mut().unwrap())
+            .collect()
     }
 }
 
-impl<E, A: Query<E>, B: Query<E>> Query<E> for (A, B) {
-    type Output<'a> = (A::Output<'a>, B::Output<'a>);
+macro_rules! impl_query {
+    ($($ty:ident)+) => {
+        impl<Event, $($ty: Query<Event>),+> Query<Event> for ($($ty),+,) {
+            type Output<'a> = ($($ty::Output<'a>),+,);
 
-    fn query(tables: &HashMap<TypeId, Table>) -> Self::Output<'_> {
-        (A::query(tables), B::query(tables))
+            fn filter(table: &(&TypeId, &Table)) -> bool {
+                $($ty::filter(table))&&+
+            }
+
+            fn data<'a>(tables: &[&'a Table]) -> Self::Output<'a> {
+                ($($ty::data(tables)),+,)
+            }
+        }
+    };
+}
+
+impl_query!(A);
+impl_query!(A B);
+impl_query!(A B C);
+impl_query!(A B C D);
+impl_query!(A B C D E);
+impl_query!(A B C D E F);
+impl_query!(A B C D E F G);
+impl_query!(A B C D E F G H);
+
+pub struct With<T>(PhantomData<T>);
+impl<E, T: 'static> Query<E> for With<T> {
+    type Output<'a> = ();
+
+    fn filter(table: &(&TypeId, &Table)) -> bool {
+        table.1.has_column::<T>()
+    }
+
+    fn data<'a>(_: &[&'a Table]) -> Self::Output<'a> {
+        ()
     }
 }
 
-pub struct EntityId<T>(u32, PhantomData<T>);
+pub struct Without<T>(PhantomData<T>);
+impl<E, T: 'static> Query<E> for Without<T> {
+    type Output<'a> = ();
+
+    fn filter(table: &(&TypeId, &Table)) -> bool {
+        !table.1.has_column::<T>()
+    }
+
+    fn data<'a>(_: &[&'a Table]) -> Self::Output<'a> {
+        ()
+    }
+}
+
+pub struct Is<T>(PhantomData<T>);
+impl<E, T: Archetype> Query<E> for Is<T> {
+    type Output<'a> = ();
+
+    fn filter(table: &(&TypeId, &Table)) -> bool {
+        *table.0 == TypeId::of::<T>()
+    }
+
+    fn data<'a>(tables: &[&'a Table]) -> Self::Output<'a> {
+        ()
+    }
+}
+
+pub struct TypedEntityId<T>(u32, PhantomData<T>);
+pub struct EntityId(u32, TypeId);
+
+impl<T: 'static> From<TypedEntityId<T>> for EntityId {
+    fn from(value: TypedEntityId<T>) -> Self {
+        Self(value.0, TypeId::of::<T>())
+    }
+}
 
 pub struct World<E> {
     archetypes: HashMap<TypeId, Table>,
@@ -255,27 +371,29 @@ impl<E> World<E> {
     }
 
     fn register<T: Archetype>(&mut self) {
-        self.archetypes.insert(
-            TypeId::of::<T>(),
-            Table::new(&T::columns()),
-        );
+        self.archetypes
+            .insert(TypeId::of::<T>(), Table::new(&T::columns()));
     }
 
-    pub fn spawn<T: Archetype>(&mut self, entity: T) -> EntityId<T> {
+    pub fn spawn<T: Archetype>(&mut self, entity: T) -> TypedEntityId<T> {
         if !self.archetypes.contains_key(&TypeId::of::<T>()) {
             self.register::<T>();
         }
 
-        let store = self
-            .archetypes
-            .get_mut(&TypeId::of::<T>())
-            .unwrap();
+        let store = self.archetypes.get_mut(&TypeId::of::<T>()).unwrap();
         entity.add(store);
-        EntityId(store.len() as u32 - 1, PhantomData)
+        TypedEntityId(store.len() as u32 - 1, PhantomData)
     }
 
     pub fn query<Q: Query<E>>(&self) -> Q::Output<'_> {
-        Q::query(&self.archetypes)
+        Q::data(
+            &self
+                .archetypes
+                .iter()
+                .filter(Q::filter)
+                .map(|(_, table)| table)
+                .collect::<Vec<_>>(),
+        )
     }
 
     /*

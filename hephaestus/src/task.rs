@@ -97,7 +97,7 @@ impl Task {
         };
         match result {
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Ok((0, true)),
-            x => x
+            x => x,
         }
     }
 
@@ -156,7 +156,7 @@ impl Task {
         match result {
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Ok(true),
             Err(vk::Result::SUBOPTIMAL_KHR) => Ok(true),
-            x => x
+            x => x,
         }
     }
 

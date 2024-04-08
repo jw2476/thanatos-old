@@ -94,6 +94,9 @@ async fn main() -> Result<()> {
     world.spawn(CopperOre {
         render: RenderObject { mesh: copper_ore },
     });
+    world.spawn(Tree {
+        render: RenderObject { mesh: tree },
+    });
 
     loop {
         if let State::Stopped = *world.get::<State>().unwrap() {

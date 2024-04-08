@@ -112,7 +112,8 @@ impl Renderer {
         };
 
         let camera_layout = descriptor::Layout::new(&ctx, &[DescriptorType::UNIFORM_BUFFER], 1000)?;
-        let object_layout = descriptor::Layout::new(&ctx, &[DescriptorType::UNIFORM_BUFFER; 2], 1000)?;
+        let object_layout =
+            descriptor::Layout::new(&ctx, &[DescriptorType::UNIFORM_BUFFER; 2], 1000)?;
 
         let pipeline = pipeline::Graphics::builder()
             .vertex(&vertex)

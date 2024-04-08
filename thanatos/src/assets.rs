@@ -3,9 +3,9 @@ use std::path::Path;
 use anyhow::Result;
 use glam::{Vec3, Vec4};
 use gltf::Glb;
-use hephaestus::{buffer::Static, Context, BufferUsageFlags, VkResult};
+use hephaestus::{buffer::Static, BufferUsageFlags, Context, VkResult};
 
-use crate::graphics::{Vertex, Renderer};
+use crate::graphics::{Renderer, Vertex};
 
 pub struct Mesh {
     pub vertex_buffer: Static,
@@ -45,8 +45,16 @@ impl Mesh {
             .get_indices_data(&model)
             .unwrap();
 
-        let vertex_buffer = Static::new(&renderer.ctx, bytemuck::cast_slice::<Vertex, u8>(&vertices), BufferUsageFlags::VERTEX_BUFFER)?;
-        let index_buffer = Static::new(&renderer.ctx, bytemuck::cast_slice::<u32, u8>(&indices), BufferUsageFlags::INDEX_BUFFER)?;
+        let vertex_buffer = Static::new(
+            &renderer.ctx,
+            bytemuck::cast_slice::<Vertex, u8>(&vertices),
+            BufferUsageFlags::VERTEX_BUFFER,
+        )?;
+        let index_buffer = Static::new(
+            &renderer.ctx,
+            bytemuck::cast_slice::<u32, u8>(&indices),
+            BufferUsageFlags::INDEX_BUFFER,
+        )?;
 
         Ok(Mesh {
             vertex_buffer,
@@ -67,10 +75,7 @@ pub struct Material {
 }
 
 impl Material {
-    pub fn load(
-        material: MaterialData,
-        renderer: &Renderer,
-    ) -> Result<Self> {
+    pub fn load(material: MaterialData, renderer: &Renderer) -> Result<Self> {
         let contents = bytemuck::bytes_of(&material);
         let buffer = Static::new(&renderer.ctx, &contents, BufferUsageFlags::UNIFORM_BUFFER)?;
         Ok(Self { buffer })

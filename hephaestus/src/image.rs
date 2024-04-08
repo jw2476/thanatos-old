@@ -65,7 +65,7 @@ pub struct ImageView {
 impl ImageView {
     pub fn new(
         device: &Device,
-        image: vk::Image, 
+        image: vk::Image,
         format: Format,
         aspect: ImageAspectFlags,
         extent: Extent2D,
